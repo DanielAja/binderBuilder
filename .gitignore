@@ -1,0 +1,15 @@
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+
+# Catalog build tool cache (full TCGdex JSON + image mirror, regenerable)
+tools/cache/
+
+# Python
+tools/.venv/
+__pycache__/
+
+# macOS
+.DS_Store
