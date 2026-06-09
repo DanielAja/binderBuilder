@@ -3,8 +3,13 @@
 //  binderBuilder
 //
 //  Assembles the 3D scene root for BinderSceneView: CameraRig + lights +
-//  ground + procedural open binder + the single deformable test page.
-//  Honors DebugLaunchState: -curl <0..1> freezes the page curl, and
+//  ground + procedural open binder + the pooled deformable pages, and owns
+//  BinderFlipController — the object that binds pooled pages to physical
+//  sheets around the current spread, resizes the page stacks, and runs the
+//  drag/spring flip lifecycle.
+//
+//  Honors DebugLaunchState: -curl <0..1> freezes the active page mid-curl,
+//  -autoFlip runs one scripted forward flip (~2 s) shortly after launch, and
 //  -deformer gpu|cpu selects the PageDeformer implementation (default gpu,
 //  with automatic CPU fallback if the GPU material fails to build).
 //
@@ -19,8 +24,8 @@ import simd
 struct SceneBootstrapResult {
     let root: Entity
     let cameraRig: CameraRig
-    let deformer: any PageDeformer
-    let page: ModelEntity?
+    let controller: BinderFlipController?
+    let router: GestureRouter?
     /// "gpu" or "cpu" — what actually got used after any fallback.
     let activeDeformerLabel: String
 }
@@ -29,7 +34,15 @@ struct SceneBootstrapResult {
 enum SceneBootstrap {
     private static let log = Logger(subsystem: "com.aja.binderBuilder", category: "SceneBootstrap")
 
+    /// Seconds after scene assembly before the scripted -autoFlip starts.
+    /// Tuned against tools/verify.sh screenshot SHOT_DELAY=10 (mid-flip)
+    /// and SHOT_DELAY=11.2 (settled, stacks rebound).
+    static let autoFlipDelay: TimeInterval = 7.45
+
     static func assemble(launchState: DebugLaunchState = .current) -> SceneBootstrapResult {
+        PageTurnSystem.ensureRegistered()
+        HitZoneComponent.registerComponent()
+
         let root = Entity()
         root.name = "SceneRoot"
 
@@ -66,75 +79,110 @@ enum SceneBootstrap {
         ground.position = SIMD3<Float>(0, -0.005, 0)
         root.addChild(ground)
 
-        // Open binder.
-        let binder = BinderBuilder3D.makeOpenBinder()
-        root.addChild(binder)
+        // Open binder shell (stacks sized by the controller below).
+        let rig = BinderBuilder3D.makeOpenBinder()
+        root.addChild(rig.root)
 
-        // Deformable test page on the right side of the spread.
-        let texture = try? Self.makeCheckerTexture()
-        let (deformer, activeLabel) = Self.makeDeformer(
+        // Pooled deformable pages, one deformer instance each.
+        let texture = (try? Self.makePaperTexture()) ?? Self.fallbackTexture()
+        let (pages, activeLabel) = PageFactory.makePages(
             requested: launchState.deformer ?? .gpu,
             texture: texture
         )
 
-        var page: ModelEntity?
-        do {
-            let entity = try deformer.makePageEntity()
-            // Page-local: x=0 spine edge, +x free edge, +z front normal.
-            // World: lie flat on the right page stack (local +z -> world +y,
-            // local +y -> world -z, i.e. page height runs away from camera).
-            entity.orientation = simd_quatf(angle: -.pi / 2, axis: SIMD3<Float>(1, 0, 0))
-            entity.position = SIMD3<Float>(
-                0.01,
-                BinderBuilder3D.pageRestHeight + 0.0008,
-                BinderBuilder3D.pageStackDepth / 2
+        var controller: BinderFlipController?
+        var router: GestureRouter?
+        if pages.isEmpty {
+            log.fault("No pooled pages could be built; binder is static")
+        } else {
+            let contentSource = DebugPageContentSource()
+            let flipController = BinderFlipController(
+                contentSource: contentSource,
+                rig: rig,
+                pages: pages,
+                initialSpread: contentSource.sheetCount / 2
             )
-            binder.addChild(entity)
-            page = entity
+            controller = flipController
 
-            let progress = launchState.curl ?? 0
-            deformer.update(curl: .progress(progress), on: entity)
-            log.info("Page deformer active: \(activeLabel, privacy: .public), curl progress \(progress, privacy: .public)")
-        } catch {
-            log.error("Failed to build page entity: \(String(describing: error), privacy: .public)")
+            if let curl = launchState.curl {
+                flipController.freezeCurl(curl)
+                log.info("Curl frozen at \(curl, privacy: .public) on sheet \(flipController.spreadIndex, privacy: .public)")
+            }
+
+            // Hit testing: scene.raycast primary, analytic OBB fallback.
+            let composite = CompositeHitTester(
+                primary: SceneRaycastHitTester(sceneAnchor: root),
+                fallback: AnalyticHitTester(zoneProvider: { [weak flipController] in
+                    flipController?.analyticZones() ?? []
+                })
+            )
+            router = GestureRouter(controller: flipController, hitTester: composite, cameraRig: cameraRig)
+
+            // Startup self-probe (logged + printed): proves whether
+            // scene.raycast works under the virtual camera on this run.
+            Task {
+                try? await Task.sleep(for: .seconds(3))
+                _ = composite.probe(origin: SIMD3<Float>(0.125, 0.5, 0), direction: SIMD3<Float>(0, -1, 0))
+            }
+
+            if launchState.autoFlip {
+                log.info("autoFlip scheduled in \(Self.autoFlipDelay, privacy: .public)s")
+                Task {
+                    try? await Task.sleep(for: .seconds(Self.autoFlipDelay))
+                    flipController.startAutoFlip()
+                }
+            }
         }
+
+        log.info("Page deformer active: \(activeLabel, privacy: .public)")
 
         DebugSceneOverrides.apply(to: root, cameraRig: cameraRig, launchState: launchState)
 
         return SceneBootstrapResult(
             root: root,
             cameraRig: cameraRig,
-            deformer: deformer,
-            page: page,
+            controller: controller,
+            router: router,
             activeDeformerLabel: activeLabel
         )
     }
 
-    /// Builds the requested deformer; if the GPU CustomMaterial cannot be
-    /// created (no Metal device / missing shader function), falls back to CPU.
-    private static func makeDeformer(
-        requested: DebugLaunchState.Deformer,
-        texture: TextureResource?
-    ) -> (any PageDeformer, String) {
-        let texture = texture ?? Self.fallbackTexture()
-        if requested == .gpu {
-            do {
-                return (try GPUPageDeformer(baseColorTexture: texture), "gpu")
-            } catch {
-                log.error("GPU deformer unavailable (\(String(describing: error), privacy: .public)); falling back to CPU")
-            }
-        }
-        do {
-            return (try CPUPageDeformer(baseColorTexture: texture), "cpu")
-        } catch {
-            // Last resort: a GPU deformer attempt so we return *something*;
-            // callers treat a missing page gracefully.
-            log.fault("CPU deformer also failed: \(String(describing: error), privacy: .public)")
-            return ((try? GPUPageDeformer(baseColorTexture: texture)) ?? DummyDeformerHolder.shared, "none")
-        }
-    }
+    // MARK: Textures
 
-    // MARK: Test texture
+    /// Subtle off-white vinyl-paper texture for the pooled pages: faint
+    /// vertical shading plus a thin darker rim so page edges read against
+    /// the stacks. (The garish dev checker lives on in makeCheckerTexture
+    /// for debugging.)
+    static func makePaperTexture() throws -> TextureResource {
+        let width = 256
+        let height = 320
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw PageDeformerError.metalUnavailable
+        }
+
+        for row in 0..<height {
+            let shade = 0.90 + 0.06 * CGFloat(row) / CGFloat(height)
+            context.setFillColor(CGColor(red: shade, green: shade, blue: shade * 0.99, alpha: 1))
+            context.fill(CGRect(x: 0, y: row, width: width, height: 1))
+        }
+        // Thin darker rim.
+        context.setStrokeColor(CGColor(red: 0.72, green: 0.72, blue: 0.73, alpha: 1))
+        context.setLineWidth(3)
+        context.stroke(CGRect(x: 1.5, y: 1.5, width: CGFloat(width) - 3, height: CGFloat(height) - 3))
+
+        guard let image = context.makeImage() else {
+            throw PageDeformerError.metalUnavailable
+        }
+        return try TextureResource(image: image, options: .init(semantic: .color))
+    }
 
     /// Procedural checker + gradient so any deformation is visually obvious:
     /// 8x10 checker in light gray/white, red tide toward the free edge (u=1)
@@ -213,11 +261,304 @@ enum SceneBootstrap {
     }
 }
 
-/// Inert deformer used only if both real implementations fail to initialize.
+// MARK: - BinderFlipController
+
+/// Owns the page pool: binds pooled entities to the sheets around the
+/// current spread, resizes the stack slabs, exposes the drag lifecycle to
+/// GestureRouter, and advances the spread when a flip settles.
 @MainActor
-private final class DummyDeformerHolder: PageDeformer {
-    static let shared = DummyDeformerHolder()
-    let debugLabel = "none"
-    func makePageEntity() throws -> ModelEntity { throw PageDeformerError.metalUnavailable }
-    func update(curl: CurlParams, on page: Entity) {}
+final class BinderFlipController {
+    private static let log = Logger(subsystem: "com.aja.binderBuilder", category: "BinderFlip")
+
+    let contentSource: any PageContentSource
+    private let rig: BinderRig
+    private let pages: [PageFactory.PooledPage]
+    private(set) var spreadIndex: Int
+
+    /// Index into `pages` of the page currently being dragged.
+    private var activeDragIndex: Int?
+
+    // Invisible pick zones above each stack (collision-only entities).
+    private let rightPick: Entity
+    private let leftPick: Entity
+
+    /// How far successive resting pages float above their stack top (m).
+    private static func layerLift(_ layer: Int) -> Float {
+        max(0.0001, 0.0011 - 0.0005 * Float(layer))
+    }
+
+    var sheetCount: Int { contentSource.sheetCount }
+
+    init(
+        contentSource: any PageContentSource,
+        rig: BinderRig,
+        pages: [PageFactory.PooledPage],
+        initialSpread: Int
+    ) {
+        self.contentSource = contentSource
+        self.rig = rig
+        self.pages = pages
+        self.spreadIndex = min(max(initialSpread, 0), contentSource.sheetCount)
+
+        for page in pages {
+            rig.root.addChild(page.entity)
+            PageTurnSystem.deformers[page.entity.id] = page.deformer
+        }
+
+        // Pick zones: thin static boxes over each page area.
+        func makePick(name: String, kind: HitZoneKind, centerX: Float) -> Entity {
+            let pick = Entity()
+            pick.name = name
+            pick.components.set(HitZoneComponent(kind: kind))
+            pick.components.set(CollisionComponent(shapes: [
+                .generateBox(
+                    width: BinderBuilder3D.pageStackWidth,
+                    height: 0.006,
+                    depth: BinderBuilder3D.pageStackDepth
+                )
+            ]))
+            pick.position = SIMD3<Float>(centerX, BinderBuilder3D.coverThickness, 0)
+            rig.root.addChild(pick)
+            return pick
+        }
+        let stackCenterX = BinderBuilder3D.stackInnerX + BinderBuilder3D.pageStackWidth / 2
+        rightPick = makePick(name: "PickRightPage", kind: .rightPage, centerX: stackCenterX)
+        leftPick = makePick(name: "PickLeftPage", kind: .leftPage, centerX: -stackCenterX)
+
+        // Covers double as (currently inert) pick targets.
+        let coverShape = ShapeResource.generateBox(
+            width: BinderBuilder3D.coverWidth,
+            height: BinderBuilder3D.coverThickness,
+            depth: BinderBuilder3D.coverDepth
+        )
+        rig.leftCover.components.set(HitZoneComponent(kind: .leftCover))
+        rig.leftCover.components.set(CollisionComponent(shapes: [coverShape]))
+        rig.rightCover.components.set(HitZoneComponent(kind: .rightCover))
+        rig.rightCover.components.set(CollisionComponent(shapes: [coverShape]))
+
+        PageTurnSystem.onFlipSettled = { [weak self] entity, component in
+            self?.handleSettled(entity: entity, component: component)
+        }
+
+        rebind(spread: spreadIndex)
+    }
+
+    // MARK: Pool rebinding
+
+    /// Binds pooled pages to the sheets around `spread`, recomputes both
+    /// stack slabs, rest heights, occupancy, and the pick zones. Called at
+    /// startup and after every settled flip.
+    func rebind(spread: Int) {
+        spreadIndex = min(max(spread, 0), sheetCount)
+        let bound = PagePool.boundSheets(spread: spreadIndex, sheetCount: sheetCount)
+        let leftSheets = PagePool.sheetsOnLeft(spread: spreadIndex)
+        let rightSheets = PagePool.sheetsOnRight(spread: spreadIndex, sheetCount: sheetCount)
+
+        BinderBuilder3D.updateStacks(rig: rig, leftSheets: leftSheets, rightSheets: rightSheets)
+
+        var sheetForPool: [Int: Int] = [:]
+        for sheet in bound {
+            sheetForPool[PagePool.poolSlot(forSheet: sheet) % pages.count] = sheet
+        }
+
+        for (index, page) in pages.enumerated() {
+            guard let sheet = sheetForPool[index] else {
+                page.entity.isEnabled = false
+                page.entity.components.remove(PageComponent.self)
+                continue
+            }
+
+            let restT = PagePool.restProgress(sheet: sheet, spread: spreadIndex)
+            let layer = PagePool.stackLayer(sheet: sheet, spread: spreadIndex)
+            let restLift = 2 * CurlParams.restRadius // curl height of a settled left page
+
+            // Right rest height: top of the right stack as it would be with
+            // this sheet on top; left rest height: ditto for the left stack.
+            // For the resting pose these are exact; for the *other* end they
+            // are the predicted post-flip heights, so a turning page lands
+            // exactly where the rebound stacks will put it.
+            let restYRight: Float
+            let restYLeft: Float
+            if restT == 0 {
+                restYRight = BinderBuilder3D.stackTopY(sheets: rightSheets) + Self.layerLift(layer)
+                restYLeft = BinderBuilder3D.stackTopY(sheets: leftSheets + 1) + Self.layerLift(0) - restLift
+            } else {
+                restYLeft = BinderBuilder3D.stackTopY(sheets: leftSheets) + Self.layerLift(layer) - restLift
+                restYRight = BinderBuilder3D.stackTopY(sheets: rightSheets + 1) + Self.layerLift(0)
+            }
+
+            // Never clobber an in-flight drag on this entity (a settle of a
+            // different sheet can rebind mid-drag).
+            let keepPhase: Bool
+            if let existing = page.entity.components[PageComponent.self],
+               existing.sheetIndex == sheet,
+               activeDragIndex == index {
+                keepPhase = true
+            } else {
+                keepPhase = false
+            }
+
+            var component = page.entity.components[PageComponent.self] ?? PageComponent(
+                sheetIndex: sheet,
+                occupiedBothSides: 0,
+                phase: .rest(t: restT)
+            )
+            component.sheetIndex = sheet
+            component.occupiedBothSides = contentSource.occupiedCount(sheet: sheet)
+            if !keepPhase {
+                component.phase = .rest(t: restT)
+                component.gesturePsi = 0
+            }
+            component.restYRight = restYRight
+            component.restYLeft = restYLeft
+            component.appliedParams = nil // force one deformer refresh
+
+            page.entity.components.set(component)
+            page.entity.position = SIMD3<Float>(
+                PageFactory.pageOriginX,
+                restT == 0 ? restYRight : restYLeft,
+                PageFactory.pageOriginZ
+            )
+            page.entity.isEnabled = true
+        }
+
+        // Pick zones ride the stack tops; a side with no page to grab turns off.
+        rightPick.position.y = BinderBuilder3D.stackTopY(sheets: rightSheets) + 0.003
+        rightPick.isEnabled = rightSheets > 0
+        leftPick.position.y = BinderBuilder3D.stackTopY(sheets: leftSheets) + 0.003
+        leftPick.isEnabled = leftSheets > 0
+
+        Self.log.info("Rebound spread \(self.spreadIndex, privacy: .public): left \(leftSheets, privacy: .public) right \(rightSheets, privacy: .public) sheets \(bound.map(String.init).joined(separator: ","), privacy: .public)")
+    }
+
+    /// OBB pick zones mirroring the collision boxes, for the analytic tester.
+    func analyticZones() -> [(kind: HitZoneKind, obb: OBB)] {
+        var zones: [(kind: HitZoneKind, obb: OBB)] = []
+        let stackCenterX = BinderBuilder3D.stackInnerX + BinderBuilder3D.pageStackWidth / 2
+        let half = SIMD3<Float>(
+            BinderBuilder3D.pageStackWidth / 2,
+            0.003,
+            BinderBuilder3D.pageStackDepth / 2
+        )
+        if rightPick.isEnabled {
+            zones.append((.rightPage, OBB(
+                center: SIMD3<Float>(stackCenterX, rightPick.position.y, 0),
+                halfExtents: half
+            )))
+        }
+        if leftPick.isEnabled {
+            zones.append((.leftPage, OBB(
+                center: SIMD3<Float>(-stackCenterX, leftPick.position.y, 0),
+                halfExtents: half
+            )))
+        }
+        let coverHalf = SIMD3<Float>(
+            BinderBuilder3D.coverWidth / 2,
+            BinderBuilder3D.coverThickness / 2,
+            BinderBuilder3D.coverDepth / 2
+        )
+        zones.append((.leftCover, OBB(center: rig.leftCover.position, halfExtents: coverHalf)))
+        zones.append((.rightCover, OBB(center: rig.rightCover.position, halfExtents: coverHalf)))
+        return zones
+    }
+
+    // MARK: Drag lifecycle (called by GestureRouter)
+
+    /// Starts a drag in the given direction. Returns the page's current curl
+    /// progress (the gesture's starting t), or nil if no page can flip that
+    /// way right now. Re-grabbing a springing page is allowed and picks up
+    /// its live t.
+    func beginDrag(direction: GestureRouter.FlipDirection, psi: Float) -> Float? {
+        let sheet = direction == .forward ? spreadIndex : spreadIndex - 1
+        guard sheet >= 0, sheet < sheetCount else { return nil }
+        guard let index = poolIndex(forSheet: sheet) else { return nil }
+
+        var component = pages[index].entity.components[PageComponent.self]!
+        let startT = component.currentT
+        component.phase = .dragging(t: startT)
+        component.gesturePsi = psi
+        pages[index].entity.components.set(component)
+        activeDragIndex = index
+        return startT
+    }
+
+    func updateDrag(t: Float, psi: Float) {
+        guard let index = activeDragIndex,
+              var component = pages[index].entity.components[PageComponent.self] else { return }
+        component.phase = .dragging(t: t)
+        component.gesturePsi = psi
+        pages[index].entity.components.set(component)
+    }
+
+    /// Releases the drag: springs to 0 or 1 (position + flick), with the
+    /// spring slowed by the sheet's occupancy (omega = omega0/sqrt(mass)).
+    func endDrag(t: Float, velocity: Float) {
+        defer { activeDragIndex = nil }
+        guard let index = activeDragIndex,
+              var component = pages[index].entity.components[PageComponent.self] else { return }
+        let target = GestureMath.releaseTarget(t: t, velocity: velocity)
+        let clamped = min(max(velocity, -GestureMath.maxSpringVelocity), GestureMath.maxSpringVelocity)
+        component.phase = .springing(FlipSpring(
+            t: t,
+            velocity: clamped,
+            target: target,
+            omega: PageDynamics.omega(occupiedSlots: component.occupiedBothSides)
+        ))
+        pages[index].entity.components.set(component)
+    }
+
+    // MARK: Debug hooks
+
+    /// -curl: freeze the active right page mid-curl.
+    func freezeCurl(_ progress: Float) {
+        guard spreadIndex < sheetCount, let index = poolIndex(forSheet: spreadIndex),
+              var component = pages[index].entity.components[PageComponent.self] else { return }
+        component.phase = .rest(t: min(max(progress, 0), 1))
+        pages[index].entity.components.set(component)
+    }
+
+    /// -autoFlip: one scripted forward flip driven through the exact gesture
+    /// path a finger would take — a drag ramp to t = 0.6 over ~0.8 s, then
+    /// the standard occupancy-weighted release spring (~0.9 s). The slow
+    /// linear ramp keeps the page visibly airborne for most of the flight,
+    /// which makes the screenshot timing robust against launch jitter.
+    func startAutoFlip() {
+        guard beginDrag(direction: .forward, psi: 0.22) != nil else { return }
+        Self.log.info("autoFlip started on sheet \(self.spreadIndex, privacy: .public)")
+
+        let rampDuration: Float = 0.8
+        let rampTarget: Float = 0.6
+        Task { [weak self] in
+            let start = Date.now
+            while true {
+                guard let self else { return }
+                let elapsed = Float(Date.now.timeIntervalSince(start))
+                let fraction = min(1, elapsed / rampDuration)
+                self.updateDrag(t: rampTarget * fraction, psi: 0.22 * (1 - 0.3 * fraction))
+                if fraction >= 1 { break }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+            self?.endDrag(t: rampTarget, velocity: 1.0)
+        }
+    }
+
+    // MARK: Settle handling
+
+    private func handleSettled(entity: Entity, component: PageComponent) {
+        let target: Float = component.currentT > 0.5 ? 1 : 0
+        if component.sheetIndex == spreadIndex, target == 1 {
+            rebind(spread: spreadIndex + 1) // forward flip completed
+        } else if component.sheetIndex == spreadIndex - 1, target == 0 {
+            rebind(spread: spreadIndex - 1) // backward flip completed
+        } else {
+            rebind(spread: spreadIndex) // cancelled flip: restore rest pose
+        }
+    }
+
+    private func poolIndex(forSheet sheet: Int) -> Int? {
+        pages.indices.first { index in
+            pages[index].entity.isEnabled
+                && pages[index].entity.components[PageComponent.self]?.sheetIndex == sheet
+        }
+    }
 }

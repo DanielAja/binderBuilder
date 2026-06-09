@@ -3,15 +3,27 @@
 //  binderBuilder
 //
 //  Procedural placeholder for the open binder: two leather-ish cover halves,
-//  a simple spine, and two static white page-stack slabs, lying open on the
-//  ground (XZ plane, Y up). Replaced by Blender assets in a later phase;
-//  dimensions match the plan (binder ~0.32 x 0.26 x 0.05 m closed, so each
-//  cover half is ~0.26 wide x 0.32 deep when open).
+//  a simple spine, and two static page-stack slabs whose thicknesses track
+//  how many sheets currently rest on each side of the open spread. Replaced
+//  by Blender assets in a later phase; dimensions match the plan (binder
+//  ~0.32 x 0.26 x 0.05 m closed, so each cover half is ~0.26 wide x 0.32
+//  deep when open).
 //
 
 import RealityKit
 import UIKit
 import simd
+
+/// Handles to the binder's mutable parts (stack slabs resize on every flip).
+@MainActor
+struct BinderRig {
+    let root: Entity
+    let leftCover: ModelEntity
+    let rightCover: ModelEntity
+    let spine: ModelEntity
+    let leftStack: ModelEntity
+    let rightStack: ModelEntity
+}
 
 @MainActor
 enum BinderBuilder3D {
@@ -20,12 +32,18 @@ enum BinderBuilder3D {
     static let coverThickness: Float = 0.008
     static let pageStackWidth: Float = 0.24
     static let pageStackDepth: Float = 0.30
-    static let pageStackThickness: Float = 0.006
+    /// Thickness of one vinyl sheet in the stack (chunky on purpose so a
+    /// single flip visibly moves material between the stacks).
+    static let sheetThickness: Float = 0.0024
+    /// Inner x edge of both page stacks (small gap for the spine/rings).
+    static let stackInnerX: Float = 0.005
 
-    /// Y of the top surface of each page stack — where the deformable page rests.
-    static var pageRestHeight: Float { coverThickness + pageStackThickness }
+    /// World Y of the TOP surface of a stack holding `sheets` sheets.
+    static func stackTopY(sheets: Int) -> Float {
+        coverThickness + Float(max(0, sheets)) * sheetThickness
+    }
 
-    static func makeOpenBinder() -> Entity {
+    static func makeOpenBinder() -> BinderRig {
         let root = Entity()
         root.name = "BinderRoot"
 
@@ -33,11 +51,6 @@ enum BinderBuilder3D {
         leather.baseColor = .init(tint: .init(red: 0.23, green: 0.10, blue: 0.06, alpha: 1))
         leather.roughness = 0.62
         leather.metallic = 0.0
-
-        var paper = PhysicallyBasedMaterial()
-        paper.baseColor = .init(tint: .init(white: 0.93, alpha: 1))
-        paper.roughness = 0.9
-        paper.metallic = 0.0
 
         let coverMesh = MeshResource.generateBox(
             width: coverWidth,
@@ -60,26 +73,56 @@ enum BinderBuilder3D {
         spine.name = "Spine"
         spine.position = SIMD3<Float>(0, (coverThickness + 0.006) / 2, 0)
 
-        let stackMesh = MeshResource.generateBox(
-            width: pageStackWidth,
-            height: pageStackThickness,
-            depth: pageStackDepth,
-            cornerRadius: 0.002
-        )
-        let stackY = coverThickness + pageStackThickness / 2
-        let leftStack = ModelEntity(mesh: stackMesh, materials: [paper])
+        // Stacks start empty; BinderFlipController calls updateStacks on
+        // every (re)bind with the real sheet distribution.
+        let leftStack = ModelEntity()
         leftStack.name = "LeftPageStack"
-        leftStack.position = SIMD3<Float>(-pageStackWidth / 2 - 0.01, stackY, 0)
-
-        let rightStack = ModelEntity(mesh: stackMesh, materials: [paper])
+        let rightStack = ModelEntity()
         rightStack.name = "RightPageStack"
-        rightStack.position = SIMD3<Float>(pageStackWidth / 2 + 0.01, stackY, 0)
 
         root.addChild(leftCover)
         root.addChild(rightCover)
         root.addChild(spine)
         root.addChild(leftStack)
         root.addChild(rightStack)
-        return root
+        return BinderRig(
+            root: root,
+            leftCover: leftCover,
+            rightCover: rightCover,
+            spine: spine,
+            leftStack: leftStack,
+            rightStack: rightStack
+        )
+    }
+
+    /// Rebuilds both stack slabs for the given sheet distribution. A side
+    /// with zero sheets shows no slab (you'd see the inside of the cover).
+    static func updateStacks(rig: BinderRig, leftSheets: Int, rightSheets: Int) {
+        updateStack(rig.leftStack, sheets: leftSheets, centerX: -(stackInnerX + pageStackWidth / 2))
+        updateStack(rig.rightStack, sheets: rightSheets, centerX: stackInnerX + pageStackWidth / 2)
+    }
+
+    private static func updateStack(_ slab: ModelEntity, sheets: Int, centerX: Float) {
+        guard sheets > 0 else {
+            slab.isEnabled = false
+            return
+        }
+        var paper = PhysicallyBasedMaterial()
+        paper.baseColor = .init(tint: .init(white: 0.93, alpha: 1))
+        paper.roughness = 0.9
+        paper.metallic = 0.0
+
+        let thickness = Float(sheets) * sheetThickness
+        slab.model = ModelComponent(
+            mesh: .generateBox(
+                width: pageStackWidth,
+                height: thickness,
+                depth: pageStackDepth,
+                cornerRadius: min(0.002, thickness / 2)
+            ),
+            materials: [paper]
+        )
+        slab.position = SIMD3<Float>(centerX, coverThickness + thickness / 2, 0)
+        slab.isEnabled = true
     }
 }

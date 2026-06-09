@@ -80,6 +80,13 @@ nonisolated enum PageMesh {
         return indices
     }
 
+    /// Conservative page-local bounds covering the whole flip sweep: the page
+    /// mirrors to x in [-width, 0] when flipped left and lifts to z ~ 2r.
+    /// Used for bounds padding (GPU) and LowLevelMesh part bounds (CPU) so
+    /// RealityKit never frustum-culls a mid-flip page.
+    static var deformationBoundsMin: SIMD3<Float> { SIMD3<Float>(-width - 0.02, -0.01, -0.02) }
+    static var deformationBoundsMax: SIMD3<Float> { SIMD3<Float>(width + 0.02, height + 0.01, 0.13) }
+
     /// Standard MeshResource (two submeshes -> expects two materials).
     /// Used by the GPU deformer; the CPU deformer builds a LowLevelMesh instead.
     static func makeMeshResource() throws -> MeshResource {
@@ -99,5 +106,67 @@ nonisolated enum PageMesh {
         back.primitives = .triangles(backIndices())
 
         return try MeshResource.generate(from: [front, back])
+    }
+
+    /// Full page mesh for the GPU deformer: four submeshes in material order
+    /// [pageFront, pageBack, sleeveFront, sleeveBack]. The sleeve pockets
+    /// share the page's deformation because the geometry modifier runs per
+    /// vertex on every submesh (see SleeveFactory.swift for the rationale).
+    ///
+    /// The front submesh additionally carries two degenerate "bounds anchor"
+    /// triangles at the extremes of the flip sweep so the static MeshResource
+    /// bounds cover every deformed pose (the geometry modifier displaces
+    /// vertices but cannot grow culling bounds).
+    static func makeCombinedMeshResource() throws -> MeshResource {
+        var positions = gridPositions()
+        var uvs = gridUVs()
+        var normals = [SIMD3<Float>](repeating: SIMD3<Float>(0, 0, 1), count: positions.count)
+
+        // Bounds anchors: x outside [0, width] never deforms (x' < d is
+        // impossible only for x > d; padding at -x never curls, and padding
+        // at +x deforms but its undeformed position is what bounds use).
+        let anchorBase = UInt32(positions.count)
+        positions.append(deformationBoundsMin)
+        positions.append(deformationBoundsMax)
+        uvs.append(SIMD2<Float>(0, 0))
+        uvs.append(SIMD2<Float>(0, 0))
+        normals.append(SIMD3<Float>(0, 0, 1))
+        normals.append(SIMD3<Float>(0, 0, 1))
+        var frontIdx = frontIndices()
+        frontIdx.append(contentsOf: [anchorBase, anchorBase, anchorBase])
+        frontIdx.append(contentsOf: [anchorBase + 1, anchorBase + 1, anchorBase + 1])
+
+        var front = MeshDescriptor(name: "pageFront")
+        front.positions = MeshBuffer(positions)
+        front.normals = MeshBuffer(normals)
+        front.textureCoordinates = MeshBuffer(uvs)
+        front.primitives = .triangles(frontIdx)
+
+        let backPositions = gridPositions()
+        var back = MeshDescriptor(name: "pageBack")
+        back.positions = MeshBuffer(backPositions)
+        back.normals = MeshBuffer([SIMD3<Float>](repeating: SIMD3<Float>(0, 0, -1), count: backPositions.count))
+        back.textureCoordinates = MeshBuffer(gridUVs())
+        back.primitives = .triangles(backIndices())
+
+        let sleeveUVs = SleeveGeometry.uvs()
+
+        var sleeveFront = MeshDescriptor(name: "sleeveFront")
+        let sleeveFrontPositions = SleeveGeometry.positions(zOffset: SleeveGeometry.surfaceOffset)
+        sleeveFront.positions = MeshBuffer(sleeveFrontPositions)
+        sleeveFront.normals = MeshBuffer(
+            [SIMD3<Float>](repeating: SIMD3<Float>(0, 0, 1), count: sleeveFrontPositions.count))
+        sleeveFront.textureCoordinates = MeshBuffer(sleeveUVs)
+        sleeveFront.primitives = .triangles(SleeveGeometry.indices(front: true))
+
+        var sleeveBack = MeshDescriptor(name: "sleeveBack")
+        let sleeveBackPositions = SleeveGeometry.positions(zOffset: -SleeveGeometry.surfaceOffset)
+        sleeveBack.positions = MeshBuffer(sleeveBackPositions)
+        sleeveBack.normals = MeshBuffer(
+            [SIMD3<Float>](repeating: SIMD3<Float>(0, 0, -1), count: sleeveBackPositions.count))
+        sleeveBack.textureCoordinates = MeshBuffer(sleeveUVs)
+        sleeveBack.primitives = .triangles(SleeveGeometry.indices(front: false))
+
+        return try MeshResource.generate(from: [front, back, sleeveFront, sleeveBack])
     }
 }
