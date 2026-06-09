@@ -30,7 +30,7 @@ case "${1:-build}" in
     xcrun simctl install "$SIM_NAME" "$APP_PATH"
     xcrun simctl terminate "$SIM_NAME" "$BUNDLE_ID" 2>/dev/null || true
     xcrun simctl launch "$SIM_NAME" "$BUNDLE_ID" "$@"
-    sleep 4
+    sleep "${SHOT_DELAY:-9}"
     xcrun simctl io "$SIM_NAME" screenshot "$OUT"
     echo "screenshot: $OUT"
     ;;

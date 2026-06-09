@@ -99,6 +99,8 @@ enum SceneBootstrap {
             log.error("Failed to build page entity: \(String(describing: error), privacy: .public)")
         }
 
+        DebugSceneOverrides.apply(to: root, cameraRig: cameraRig, launchState: launchState)
+
         return SceneBootstrapResult(
             root: root,
             cameraRig: cameraRig,
