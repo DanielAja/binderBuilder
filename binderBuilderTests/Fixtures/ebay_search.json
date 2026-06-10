@@ -1,0 +1,40 @@
+{
+  "href": "https://api.ebay.com/buy/browse/v1/item_summary/search?q=pokemon%20Charizard%20Base%20Set%204&category_ids=183454&limit=50",
+  "total": 6,
+  "limit": 50,
+  "offset": 0,
+  "itemSummaries": [
+    {
+      "itemId": "v1|110001|0",
+      "title": "Pokemon Charizard Base Set 4/102 Holo",
+      "price": { "value": "12.50", "currency": "USD" },
+      "condition": "Used",
+      "buyingOptions": ["FIXED_PRICE"]
+    },
+    {
+      "itemId": "v1|110002|0",
+      "title": "Charizard 4/102 Base Set NM",
+      "price": { "value": "10.00", "currency": "USD" }
+    },
+    {
+      "itemId": "v1|110003|0",
+      "title": "Charizard Base Set heavy played",
+      "price": { "value": "8.00", "currency": "USD" }
+    },
+    {
+      "itemId": "v1|110004|0",
+      "title": "Charizard Base Set PSA 7",
+      "price": { "value": "100.00", "currency": "USD" }
+    },
+    {
+      "itemId": "v1|110005|0",
+      "title": "Charizard Basis-Set (EU listing, skipped: not USD)",
+      "price": { "value": "55.00", "currency": "EUR" }
+    },
+    {
+      "itemId": "v1|110006|0",
+      "title": "Charizard lot (skipped: no price)",
+      "buyingOptions": ["AUCTION"]
+    }
+  ]
+}
