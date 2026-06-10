@@ -21,6 +21,7 @@ final class AppEnvironment {
     let userDatabase: UserDatabase
     let settings: SettingsStore
     let collection: CollectionStore
+    let wishlist: WishlistStore
     let binders: BinderStore
     let prices: PriceStore
     let imageCache: ImageCache
@@ -40,6 +41,7 @@ final class AppEnvironment {
         settings = SettingsStore()
         let collection = CollectionStore(database: database)
         self.collection = collection
+        wishlist = WishlistStore(database: database)
         binders = BinderStore(database: database, catalog: catalog, isOwned: { collection.isOwned($0) })
         prices = PriceStore(database: database, catalog: catalog, settings: settings)
         let cache = ImageCache.standard()

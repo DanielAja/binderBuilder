@@ -47,8 +47,9 @@ nonisolated final class UserDatabase: Sendable {
         return configuration
     }
 
-    /// Schema v1 — raw SQL so it matches the fixed contract exactly.
-    private static var migrator: DatabaseMigrator {
+    /// Schema migrations (raw SQL so they match the fixed contract exactly).
+    /// Internal so tests can run partial migrations.
+    static var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
         migrator.registerMigration("v1") { db in
             try db.execute(sql: """
@@ -76,6 +77,42 @@ nonisolated final class UserDatabase: Sendable {
                   PRIMARY KEY (card_id, source, variant)
                 );
                 """)
+        }
+        // v2 — per-copy ownership (condition + grade), wishlist, value trend.
+        migrator.registerMigration("v2") { db in
+            try db.execute(sql: """
+                CREATE TABLE card_copy (
+                  id TEXT PRIMARY KEY,
+                  card_id TEXT NOT NULL, variant TEXT NOT NULL,
+                  condition TEXT NOT NULL DEFAULT 'NM',
+                  grade_company TEXT, grade_value REAL,
+                  acquired_price REAL, acquired_at REAL NOT NULL,
+                  notes TEXT
+                );
+                CREATE INDEX idx_copy_card ON card_copy(card_id, variant);
+                CREATE TABLE wishlist (
+                  card_id TEXT NOT NULL, variant TEXT NOT NULL, added_at REAL NOT NULL,
+                  PRIMARY KEY (card_id, variant)
+                );
+                CREATE TABLE value_snapshot (day TEXT PRIMARY KEY, total REAL NOT NULL);
+                """)
+            // Expand each owned_card row's quantity into N raw (NM) copies.
+            let owned = try Row.fetchAll(db, sql: "SELECT card_id, variant, quantity, added_at FROM owned_card")
+            for row in owned {
+                let cardID: String = row["card_id"]
+                let variant: String = row["variant"]
+                let quantity: Int = row["quantity"]
+                let addedAt: Double = row["added_at"]
+                for _ in 0..<max(1, quantity) {
+                    try db.execute(
+                        sql: """
+                        INSERT INTO card_copy (id, card_id, variant, condition, acquired_at)
+                        VALUES (?, ?, ?, 'NM', ?)
+                        """,
+                        arguments: [UUID().uuidString, cardID, variant, addedAt])
+                }
+            }
+            try db.execute(sql: "DROP TABLE owned_card")
         }
         return migrator
     }

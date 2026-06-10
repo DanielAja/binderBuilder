@@ -24,11 +24,20 @@ nonisolated protocol CatalogReading: Sendable {
     func bundledQuotes(for cardID: String) async throws -> [PriceQuote]
     /// Bundled perceptual-hash index (4 orientations per card) for the scanner.
     func hashEntries() async throws -> [(cardID: String, orientation: Int, dhash: Data, phash: Data)]
+    /// Distinct owned-card count per set (set completion), given owned card IDs.
+    func ownedCardCounts(forCardIDs cardIDs: [String]) async throws -> [String: Int]
+    /// Rarity + type histograms over the given card IDs (collection stats).
+    func cardFacets(forCardIDs cardIDs: [String]) async throws -> (rarities: [String: Int], types: [String: Int])
+    /// Bundled TCGplayer market price per printing (instant collection value).
+    func bundledMarket(for refs: [CardRef]) async throws -> [CardRef: Double]
 }
 
 extension CatalogReading {
     /// Default: no hash index (test doubles); GRDBCatalogDatabase overrides.
     func hashEntries() async throws -> [(cardID: String, orientation: Int, dhash: Data, phash: Data)] { [] }
+    func ownedCardCounts(forCardIDs cardIDs: [String]) async throws -> [String: Int] { [:] }
+    func cardFacets(forCardIDs cardIDs: [String]) async throws -> (rarities: [String: Int], types: [String: Int]) { ([:], [:]) }
+    func bundledMarket(for refs: [CardRef]) async throws -> [CardRef: Double] { [:] }
 }
 
 nonisolated final class GRDBCatalogDatabase: CatalogReading {
@@ -198,6 +207,75 @@ nonisolated final class GRDBCatalogDatabase: CatalogReading {
         }
     }
 
+    // MARK: - Collection aggregates
+
+    /// SQLite parameter-count safety: query owned-ID lists in chunks.
+    private static let chunkSize = 900
+
+    func ownedCardCounts(forCardIDs cardIDs: [String]) async throws -> [String: Int] {
+        guard !cardIDs.isEmpty else { return [:] }
+        return try await reader.read { db in
+            var counts: [String: Int] = [:]
+            for chunk in cardIDs.chunked(into: Self.chunkSize) {
+                let placeholders = databaseQuestionMarks(count: chunk.count)
+                let rows = try Row.fetchAll(
+                    db,
+                    sql: "SELECT set_id, COUNT(*) AS c FROM card WHERE id IN (\(placeholders)) GROUP BY set_id",
+                    arguments: StatementArguments(chunk))
+                for row in rows { counts[row["set_id"], default: 0] += (row["c"] as Int? ?? 0) }
+            }
+            return counts
+        }
+    }
+
+    func cardFacets(forCardIDs cardIDs: [String]) async throws -> (rarities: [String: Int], types: [String: Int]) {
+        guard !cardIDs.isEmpty else { return ([:], [:]) }
+        return try await reader.read { db in
+            var rarities: [String: Int] = [:]
+            var types: [String: Int] = [:]
+            for chunk in cardIDs.chunked(into: Self.chunkSize) {
+                let placeholders = databaseQuestionMarks(count: chunk.count)
+                let rows = try Row.fetchAll(
+                    db,
+                    sql: "SELECT rarity, types FROM card WHERE id IN (\(placeholders))",
+                    arguments: StatementArguments(chunk))
+                for row in rows {
+                    if let rarity = row["rarity"] as String?, !rarity.isEmpty {
+                        rarities[rarity, default: 0] += 1
+                    }
+                    for type in Self.parseTypes(row["types"]) { types[type, default: 0] += 1 }
+                }
+            }
+            return (rarities, types)
+        }
+    }
+
+    func bundledMarket(for refs: [CardRef]) async throws -> [CardRef: Double] {
+        guard !refs.isEmpty else { return [:] }
+        let wanted = Set(refs)
+        let cardIDs = Array(Set(refs.map(\.cardID)))
+        return try await reader.read { db in
+            var out: [CardRef: Double] = [:]
+            for chunk in cardIDs.chunked(into: Self.chunkSize) {
+                let placeholders = databaseQuestionMarks(count: chunk.count)
+                let rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                    SELECT card_id, variant, market FROM price_snapshot
+                    WHERE source = 'tcgplayer' AND market IS NOT NULL AND card_id IN (\(placeholders))
+                    """,
+                    arguments: StatementArguments(chunk))
+                for row in rows {
+                    guard let variant = CardVariant(rawValue: row["variant"] as String? ?? ""),
+                          let market = row["market"] as Double? else { continue }
+                    let ref = CardRef(cardID: row["card_id"], variant: variant)
+                    if wanted.contains(ref) { out[ref] = market }
+                }
+            }
+            return out
+        }
+    }
+
     // MARK: - Row mapping
 
     private static let summaryColumns = """
@@ -259,5 +337,15 @@ nonisolated final class GRDBCatalogDatabase: CatalogReading {
         if let date = formatter.date(from: string) { return date }
         formatter.formatOptions = [.withFullDate]
         return formatter.date(from: string) ?? .distantPast
+    }
+}
+
+private extension Array {
+    /// Splits into sub-arrays of at most `size` (for chunked SQL IN-lists).
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
     }
 }
