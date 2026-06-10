@@ -39,8 +39,13 @@ enum SceneBootstrap {
     /// and SHOT_DELAY=11.2 (settled, stacks rebound).
     static let autoFlipDelay: TimeInterval = 7.45
 
-    static func assemble(launchState: DebugLaunchState = .current) -> SceneBootstrapResult {
+    static func assemble(
+        launchState: DebugLaunchState = .current,
+        cardContent: (any CardContentProviding)? = nil,
+        textureCache: CardTextureCache? = nil
+    ) -> SceneBootstrapResult {
         PageTurnSystem.ensureRegistered()
+        CardPlacementSystem.ensureRegistered()
         HitZoneComponent.registerComponent()
 
         let root = Entity()
@@ -95,7 +100,7 @@ enum SceneBootstrap {
         if pages.isEmpty {
             log.fault("No pooled pages could be built; binder is static")
         } else {
-            let contentSource = DebugPageContentSource()
+            let contentSource: any CardContentProviding = cardContent ?? DebugCardContentSource()
             let flipController = BinderFlipController(
                 contentSource: contentSource,
                 rig: rig,
@@ -103,6 +108,14 @@ enum SceneBootstrap {
                 initialSpread: contentSource.sheetCount / 2
             )
             controller = flipController
+
+            // Card layer: spawn/despawn pocket cards on every rebind, then
+            // rebind once now that the hook is wired so the initial spread
+            // gets its cards. (The init's first rebind ran before this hook.)
+            let cardTextures = textureCache ?? CardTextureCache(imageCache: .standard())
+            let placement = CardPlacement(provider: contentSource, textures: cardTextures)
+            flipController.onRebound = { placement.rebound($0) }
+            flipController.rebind(spread: flipController.spreadIndex)
 
             if let curl = launchState.curl {
                 flipController.freezeCurl(curl)
@@ -275,6 +288,12 @@ final class BinderFlipController {
     private let pages: [PageFactory.PooledPage]
     private(set) var spreadIndex: Int
 
+    /// Called at the end of every rebind with each pool entity and the sheet it
+    /// now represents (nil = disabled). The card layer hooks here to spawn /
+    /// despawn pocket cards. Set after init; assign then call `rebind` once to
+    /// populate the initial spread.
+    var onRebound: (([(entity: ModelEntity, sheet: Int?)]) -> Void)?
+
     /// Index into `pages` of the page currently being dragged.
     private var activeDragIndex: Int?
 
@@ -429,6 +448,14 @@ final class BinderFlipController {
         leftPick.isEnabled = leftSheets > 0
 
         Self.log.info("Rebound spread \(self.spreadIndex, privacy: .public): left \(leftSheets, privacy: .public) right \(rightSheets, privacy: .public) sheets \(bound.map(String.init).joined(separator: ","), privacy: .public)")
+
+        if let onRebound {
+            let states: [(entity: ModelEntity, sheet: Int?)] = pages.map { page in
+                let sheet = page.entity.isEnabled ? page.entity.components[PageComponent.self]?.sheetIndex : nil
+                return (page.entity, sheet)
+            }
+            onRebound(states)
+        }
     }
 
     /// OBB pick zones mirroring the collision boxes, for the analytic tester.
