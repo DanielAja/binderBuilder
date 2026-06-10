@@ -10,9 +10,14 @@ import SwiftUI
 
 struct BrowseView: View {
     let env: AppEnvironment
-    @State private var mode: Mode = .search
+    @State private var mode: Mode
 
     enum Mode: String, CaseIterable { case search = "Search", sets = "Sets" }
+
+    init(env: AppEnvironment) {
+        self.env = env
+        _mode = State(initialValue: ProcessInfo.processInfo.arguments.contains("-showSets") ? .sets : .search)
+    }
 
     var body: some View {
         NavigationStack {
