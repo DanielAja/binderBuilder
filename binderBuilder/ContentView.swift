@@ -2,14 +2,33 @@
 //  ContentView.swift
 //  binderBuilder
 //
-//  Created by Daniel on 6/9/26.
+//  Root view: owns the AppEnvironment, prepares first-run content (demo seed +
+//  binder snapshot), and shows the 3D binder once ready.
 //
 
 import SwiftUI
 
 struct ContentView: View {
+    @State private var env = AppEnvironment()
+
     var body: some View {
-        BinderSceneView()
+        ZStack {
+            if env.isReady {
+                BinderSceneView(env: env)
+            } else {
+                ZStack {
+                    LinearGradient(
+                        colors: [Color(white: 0.22), Color(white: 0.05)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                    .ignoresSafeArea()
+                    ProgressView("Preparing your binder…")
+                        .tint(.white)
+                        .foregroundStyle(.white)
+                }
+                .task { await env.prepare() }
+            }
+        }
     }
 }
 

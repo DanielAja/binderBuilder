@@ -25,6 +25,15 @@ final class CardInteractionController {
     private(set) weak var floatingCard: ModelEntity?
     var isFloating: Bool { floatingCard != nil }
 
+    /// CardRef of the floating card, if any (drives the owned-toggle control).
+    var floatingRef: CardRef? { floatingCard?.components[CardSlotComponent.self]?.ref }
+
+    /// Updates the floating card's grayscale/foil to reflect a new owned state.
+    func setFloatingOwned(_ owned: Bool) {
+        guard let card = floatingCard, let slot = card.components[CardSlotComponent.self] else { return }
+        CardFactory.setOwnership(card, owned: owned, variant: slot.ref.variant)
+    }
+
     /// Distance in front of the camera the inspected card floats to (m).
     private let floatDistance: Float = 0.26
 
