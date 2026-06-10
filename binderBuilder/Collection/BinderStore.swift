@@ -43,6 +43,27 @@ import os
         loadDisplayCase()
     }
 
+    /// First unoccupied slot in a binder (front-to-back, row-major), for
+    /// quick "add to binder" placement. nil when the binder is full/unknown.
+    func firstEmptySlot(binderID: String) -> SlotLocation? {
+        guard let binder = binders.first(where: { $0.id == binderID }) else { return nil }
+        let occupied: Set<[Int]> = (try? database.queue.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT page_index, side, slot_index FROM slot_assignment WHERE binder_id = ?",
+                arguments: [binderID])
+            return Set(rows.map { [$0["page_index"] as Int, $0["side"] as Int, $0["slot_index"] as Int] })
+        }) ?? []
+        for page in 0..<binder.pageCount {
+            for side in [PageSide.front, .back] {
+                for slot in 0..<SpreadModel.slotsPerPage where !occupied.contains([page, side.rawValue, slot]) {
+                    return SlotLocation(binderID: binderID, pageIndex: page, side: side, slotIndex: slot)
+                }
+            }
+        }
+        return nil
+    }
+
     // MARK: - Binder CRUD
 
     @discardableResult

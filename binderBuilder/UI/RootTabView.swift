@@ -25,6 +25,8 @@ struct RootTabView: View {
             _tab = State(initialValue: .browse)
         } else if ProcessInfo.processInfo.arguments.contains("-showCollection") {
             _tab = State(initialValue: .collection)
+        } else if ProcessInfo.processInfo.arguments.contains("-showSettings") {
+            _tab = State(initialValue: .settings)
         } else {
             switch DebugLaunchState.current.uiState {
             case .binderOpen, .cardFloating: _tab = State(initialValue: .binder)

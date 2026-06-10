@@ -60,6 +60,7 @@ struct SetCardsView: View {
     @State private var cards: [CardSummary] = []
     @State private var filter: OwnFilter = .all
     @State private var quickAdd = false
+    @State private var celebrate = false
 
     enum OwnFilter: String, CaseIterable { case all = "All", owned = "Owned", missing = "Missing" }
 
@@ -110,6 +111,29 @@ struct SetCardsView: View {
             cards = (try? await env.catalog?.cards(inSet: set.id)) ?? []
             env.imageCache.prefetch(cards, quality: .low, pinned: false)
         }
+        .overlay {
+            if celebrate {
+                VStack(spacing: 8) {
+                    Image(systemName: "checkmark.seal.fill").font(.system(size: 56)).foregroundStyle(.green)
+                    Text("Set Complete! 🎉").font(.title2.bold())
+                    Text(set.name).foregroundStyle(.secondary)
+                }
+                .padding(28)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+                .shadow(radius: 20)
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+    }
+
+    private func celebrateIfComplete(wasComplete: Bool) {
+        guard !wasComplete, !cards.isEmpty, cards.allSatisfy(isOwned) else { return }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        withAnimation(.spring) { celebrate = true }
+        Task {
+            try? await Task.sleep(for: .seconds(2.2))
+            withAnimation { celebrate = false }
+        }
     }
 
     private var completionHeader: some View {
@@ -150,6 +174,7 @@ struct SetCardsView: View {
     }
 
     private func toggleOwned(_ card: CardSummary) {
+        let wasComplete = !cards.isEmpty && cards.allSatisfy(isOwned)
         let owned = isOwned(card)
         if owned {
             for v in CardVariant.allCases {
@@ -159,12 +184,15 @@ struct SetCardsView: View {
             env.collection.setOwned(primaryRef(card), quantity: 1)
         }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        celebrateIfComplete(wasComplete: wasComplete)
     }
 
     private func markAllOwned() {
+        let wasComplete = !cards.isEmpty && cards.allSatisfy(isOwned)
         for card in cards where !isOwned(card) {
             env.collection.setOwned(primaryRef(card), quantity: 1)
         }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
+        celebrateIfComplete(wasComplete: wasComplete)
     }
 }

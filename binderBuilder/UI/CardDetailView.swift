@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct CardDetailView: View {
     let card: CardSummary
@@ -18,6 +19,7 @@ struct CardDetailView: View {
     @State private var refreshing = false
     @State private var addingCopy = false
     @State private var editorCopy: CardCopy?
+    @State private var toast: String?
 
     private var ref: CardRef { CardRef(cardID: card.id, variant: variant) }
     private var owned: Bool { env.collection.isOwned(ref) }
@@ -85,10 +87,26 @@ struct CardDetailView: View {
         .navigationTitle(card.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if !env.binders.binders.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        ForEach(env.binders.binders) { binder in
+                            Button(binder.name) { addToBinder(binder.id) }
+                        }
+                    } label: { Image(systemName: "book") }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { _ = env.wishlist.toggle(ref) } label: {
                     Image(systemName: wished ? "heart.fill" : "heart").foregroundStyle(.pink)
                 }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let toast { Text(toast).font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: Capsule()).padding(.bottom, 24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .sheet(isPresented: $addingCopy) { CopyEditorView(ref: ref, env: env) }
@@ -176,6 +194,24 @@ struct CardDetailView: View {
         .padding()
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
+    }
+
+    private func addToBinder(_ binderID: String) {
+        guard let slot = env.binders.firstEmptySlot(binderID: binderID) else {
+            showToast("Binder is full"); return
+        }
+        if !owned { env.collection.setOwned(ref, quantity: 1) }
+        env.binders.assign(ref, to: slot)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showToast("Added to \(env.binders.binders.first { $0.id == binderID }?.name ?? "binder")")
+    }
+
+    private func showToast(_ text: String) {
+        withAnimation { toast = text }
+        Task {
+            try? await Task.sleep(for: .seconds(1.8))
+            withAnimation { toast = nil }
+        }
     }
 
     private func priceText(_ quote: PriceQuote) -> String {
