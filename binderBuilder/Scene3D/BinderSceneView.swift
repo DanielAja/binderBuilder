@@ -22,21 +22,39 @@ struct BinderSceneView: View {
                 content.add(model.result.root)
             }
             .gesture(
-                DragGesture(minimumDistance: 0)
+                // >0 minimum so a tap never starts a page drag; the tap gesture
+                // below owns pull-out/return. While a card floats, the drag
+                // spins it (arcball); otherwise it curls a page.
+                DragGesture(minimumDistance: 8)
                     .onChanged { value in
-                        model.result.router?.dragChanged(
-                            location: value.location,
-                            startLocation: value.startLocation,
-                            translation: value.translation,
-                            viewport: proxy.size
-                        )
+                        if model.result.cardInteraction?.isFloating == true {
+                            model.result.cardInteraction?.dragChanged(
+                                location: value.location, viewport: proxy.size
+                            )
+                        } else {
+                            model.result.router?.dragChanged(
+                                location: value.location,
+                                startLocation: value.startLocation,
+                                translation: value.translation,
+                                viewport: proxy.size
+                            )
+                        }
                     }
                     .onEnded { value in
-                        model.result.router?.dragEnded(
-                            translation: value.translation,
-                            velocity: CGSize(width: value.velocity.width, height: value.velocity.height),
-                            viewport: proxy.size
-                        )
+                        let v = CGSize(width: value.velocity.width, height: value.velocity.height)
+                        if model.result.cardInteraction?.isFloating == true {
+                            model.result.cardInteraction?.dragEnded(velocity: v, viewport: proxy.size)
+                        } else {
+                            model.result.router?.dragEnded(
+                                translation: value.translation, velocity: v, viewport: proxy.size
+                            )
+                        }
+                    }
+            )
+            .simultaneousGesture(
+                SpatialTapGesture()
+                    .onEnded { value in
+                        model.result.cardInteraction?.handleTap(at: value.location, viewport: proxy.size)
                     }
             )
         }

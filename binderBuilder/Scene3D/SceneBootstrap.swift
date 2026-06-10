@@ -26,6 +26,8 @@ struct SceneBootstrapResult {
     let cameraRig: CameraRig
     let controller: BinderFlipController?
     let router: GestureRouter?
+    /// Card pull-out / inspect / return interaction (tap + arcball drag).
+    let cardInteraction: CardInteractionController?
     /// Device-motion source driving the holo sweep; kept alive by the result.
     let motionProvider: any MotionProvider
     /// "gpu" or "cpu" — what actually got used after any fallback.
@@ -49,6 +51,7 @@ enum SceneBootstrap {
         PageTurnSystem.ensureRegistered()
         CardPlacementSystem.ensureRegistered()
         MotionUpdateSystem.ensureRegistered()
+        CardFloatSystem.ensureRegistered()
         HitZoneComponent.registerComponent()
 
         // Device motion drives the card holo sweep (and, later, floating-card
@@ -107,6 +110,7 @@ enum SceneBootstrap {
 
         var controller: BinderFlipController?
         var router: GestureRouter?
+        var cardInteraction: CardInteractionController?
         if pages.isEmpty {
             log.fault("No pooled pages could be built; binder is static")
         } else {
@@ -141,6 +145,19 @@ enum SceneBootstrap {
             )
             router = GestureRouter(controller: flipController, hitTester: composite, cameraRig: cameraRig)
 
+            // Card pull-out / inspect / return.
+            let interaction = CardInteractionController(root: root, cameraRig: cameraRig)
+            cardInteraction = interaction
+
+            // -uiState cardFloating: auto-pull a card shortly after launch so
+            // the floating/holo pose can be screenshot deterministically.
+            if launchState.uiState == .cardFloating {
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    interaction.pullOutFirstAvailable(yawDegrees: launchState.cardYawDegrees)
+                }
+            }
+
             // Startup self-probe (logged + printed): proves whether
             // scene.raycast works under the virtual camera on this run.
             Task {
@@ -166,6 +183,7 @@ enum SceneBootstrap {
             cameraRig: cameraRig,
             controller: controller,
             router: router,
+            cardInteraction: cardInteraction,
             motionProvider: motionProvider,
             activeDeformerLabel: activeLabel
         )
