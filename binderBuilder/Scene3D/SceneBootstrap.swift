@@ -66,25 +66,39 @@ enum SceneBootstrap {
         let root = Entity()
         root.name = "SceneRoot"
 
+        // Studio image-based lighting (soft reflections + ambient fill); the
+        // explicit lights below carry the scene if the IBL asset can't load.
+        EnvironmentBuilder.applyIBL(to: root)
+
         // Camera.
         let cameraRig = CameraRig()
         root.addChild(cameraRig.root)
 
-        // Lights: directional key + dim point fill (IBL deferred to a later phase).
+        // Warm key from upper-right.
         let key = DirectionalLight()
         key.name = "KeyLight"
-        key.light.intensity = 4200
-        key.light.color = .init(red: 1.0, green: 0.97, blue: 0.92, alpha: 1)
+        key.light.intensity = 6500
+        key.light.color = .init(red: 1.0, green: 0.96, blue: 0.90, alpha: 1)
         key.look(at: .zero, from: SIMD3<Float>(0.55, 1.4, 0.75), relativeTo: nil)
         root.addChild(key)
 
+        // Cool fill from the left.
         let fill = PointLight()
         fill.name = "FillLight"
-        fill.light.intensity = 8000
-        fill.light.attenuationRadius = 4
-        fill.light.color = .init(red: 0.85, green: 0.9, blue: 1.0, alpha: 1)
-        fill.position = SIMD3<Float>(-0.5, 0.55, 0.45)
+        fill.light.intensity = 16000
+        fill.light.attenuationRadius = 7
+        fill.light.color = .init(red: 0.86, green: 0.91, blue: 1.0, alpha: 1)
+        fill.position = SIMD3<Float>(-0.5, 0.6, 0.5)
         root.addChild(fill)
+
+        // Soft ambient lift from the front so the desk + walls aren't murky
+        // (RealityKit has no ambient light; a dim wide directional stands in).
+        let ambient = DirectionalLight()
+        ambient.name = "AmbientLift"
+        ambient.light.intensity = 2600
+        ambient.light.color = .init(red: 0.95, green: 0.95, blue: 1.0, alpha: 1)
+        ambient.look(at: .zero, from: SIMD3<Float>(-0.2, 0.7, 1.0), relativeTo: nil)
+        root.addChild(ambient)
 
         // Neutral dark ground plane (thin box).
         var groundMaterial = PhysicallyBasedMaterial()
@@ -96,12 +110,19 @@ enum SceneBootstrap {
             materials: [groundMaterial]
         )
         ground.name = "Ground"
-        ground.position = SIMD3<Float>(0, -0.005, 0)
+        // Sits well below the binder desk (which has its top at y=0) so they
+        // never z-fight; it's the floor for the shelf scene.
+        ground.position = SIMD3<Float>(0, -0.12, 0)
         root.addChild(ground)
 
         // Open binder shell (stacks sized by the controller below).
         let rig = BinderBuilder3D.makeOpenBinder()
         root.addChild(rig.root)
+
+        // The binder's "setting": a wooden desk, back wall, contact shadow, and
+        // background props. Parented under the binder root so it shows/hides
+        // with the binder (the shelf scene has its own environment).
+        rig.root.addChild(DeskSceneBuilder.build())
 
         // Pooled deformable pages, one deformer instance each.
         let texture = (try? Self.makePaperTexture()) ?? Self.fallbackTexture()
