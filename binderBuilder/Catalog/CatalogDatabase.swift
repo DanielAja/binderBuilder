@@ -22,6 +22,13 @@ nonisolated protocol CatalogReading: Sendable {
     func allSets() async throws -> [SetInfo]
     /// Last-known prices baked into the catalog at build time (isLive=false).
     func bundledQuotes(for cardID: String) async throws -> [PriceQuote]
+    /// Bundled perceptual-hash index (4 orientations per card) for the scanner.
+    func hashEntries() async throws -> [(cardID: String, orientation: Int, dhash: Data, phash: Data)]
+}
+
+extension CatalogReading {
+    /// Default: no hash index (test doubles); GRDBCatalogDatabase overrides.
+    func hashEntries() async throws -> [(cardID: String, orientation: Int, dhash: Data, phash: Data)] { [] }
 }
 
 nonisolated final class GRDBCatalogDatabase: CatalogReading {

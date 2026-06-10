@@ -24,6 +24,7 @@ struct BinderSceneView: View {
     @State private var floatingRef: CardRef?
     @State private var showingLibrary = false
     @State private var debugDetail: CardSummary?
+    @State private var debugScan = false
 
     init(env: AppEnvironment) {
         self.env = env
@@ -96,7 +97,9 @@ struct BinderSceneView: View {
         .sheet(item: $debugDetail) { card in
             NavigationStack { CardDetailView(card: card, env: env) }
         }
+        .sheet(isPresented: $debugScan) { ScanView(env: env) }
         .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("-showScan") { debugScan = true }
             if ProcessInfo.processInfo.arguments.contains("-showLibrary") { showingLibrary = true }
             if ProcessInfo.processInfo.arguments.contains("-showCardDetail") {
                 Task {

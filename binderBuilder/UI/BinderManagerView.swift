@@ -16,11 +16,17 @@ struct BinderManagerView: View {
     @State private var newName = ""
     @State private var renaming: Binder?
     @State private var renameText = ""
+    @State private var showingScan = false
 
     var body: some View {
         List {
             Section("Collection") {
                 Label("\(env.collection.ownedCount) cards owned", systemImage: "checkmark.seal.fill")
+                Button {
+                    showingScan = true
+                } label: {
+                    Label("Scan a real page", systemImage: "camera.viewfinder")
+                }
             }
             Section("Binders") {
                 ForEach(env.binders.binders) { binder in
@@ -49,6 +55,7 @@ struct BinderManagerView: View {
         .toolbar {
             Button { newName = ""; showingCreate = true } label: { Image(systemName: "plus") }
         }
+        .sheet(isPresented: $showingScan) { ScanView(env: env) }
         .alert("New binder", isPresented: $showingCreate) {
             TextField("Name", text: $newName)
             Button("Create") {
