@@ -26,6 +26,8 @@ struct SceneBootstrapResult {
     let cameraRig: CameraRig
     let controller: BinderFlipController?
     let router: GestureRouter?
+    /// Device-motion source driving the holo sweep; kept alive by the result.
+    let motionProvider: any MotionProvider
     /// "gpu" or "cpu" — what actually got used after any fallback.
     let activeDeformerLabel: String
 }
@@ -46,7 +48,15 @@ enum SceneBootstrap {
     ) -> SceneBootstrapResult {
         PageTurnSystem.ensureRegistered()
         CardPlacementSystem.ensureRegistered()
+        MotionUpdateSystem.ensureRegistered()
         HitZoneComponent.registerComponent()
+
+        // Device motion drives the card holo sweep (and, later, floating-card
+        // drift). Provider runs for the scene's lifetime; -holoPhase freezes it.
+        let motionProvider = MotionProviderFactory.make(launchState: launchState)
+        motionProvider.start()
+        MotionUpdateSystem.provider = motionProvider
+        MotionUpdateSystem.holoPhaseOverride = launchState.holoPhase
 
         let root = Entity()
         root.name = "SceneRoot"
@@ -156,6 +166,7 @@ enum SceneBootstrap {
             cameraRig: cameraRig,
             controller: controller,
             router: router,
+            motionProvider: motionProvider,
             activeDeformerLabel: activeLabel
         )
     }
