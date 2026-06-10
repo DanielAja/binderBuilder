@@ -13,13 +13,56 @@ import UIKit
 struct SetBrowserView: View {
     let env: AppEnvironment
     @State private var sets: [SetInfo] = []
+    @State private var sort: SetSort = .release
+
+    enum SetSort: String, CaseIterable {
+        case release = "Newest", generation = "Generation", name = "A–Z"
+    }
+
+    /// Sets grouped by generation/series, series ordered by earliest release,
+    /// sets within a series ordered newest-first.
+    private var generations: [(series: String, sets: [SetInfo])] {
+        let groups = Dictionary(grouping: sets) { $0.seriesName ?? "Other" }
+        return groups
+            .map { (series: $0.key, sets: $0.value.sorted { ($0.releaseDate ?? "") > ($1.releaseDate ?? "") }) }
+            .sorted { ($0.sets.last?.releaseDate ?? "") < ($1.sets.last?.releaseDate ?? "") }
+    }
+
+    private var flatSorted: [SetInfo] {
+        switch sort {
+        case .release: return sets.sorted { ($0.releaseDate ?? "") > ($1.releaseDate ?? "") }
+        case .name: return sets.sorted { $0.name < $1.name }
+        case .generation: return sets
+        }
+    }
 
     var body: some View {
-        List(sets) { set in
-            NavigationLink(value: set) { setRow(set) }
+        List {
+            if sort == .generation {
+                ForEach(generations, id: \.series) { group in
+                    Section(group.series) {
+                        ForEach(group.sets) { set in
+                            NavigationLink(value: set) { setRow(set) }
+                        }
+                    }
+                }
+            } else {
+                ForEach(flatSorted) { set in
+                    NavigationLink(value: set) { setRow(set) }
+                }
+            }
         }
         .listStyle(.plain)
         .navigationTitle("Sets")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Picker("Sort", selection: $sort) {
+                        ForEach(SetSort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                } label: { Image(systemName: "arrow.up.arrow.down.circle") }
+            }
+        }
         .navigationDestination(for: SetInfo.self) { SetCardsView(set: $0, env: env) }
         .navigationDestination(for: CardSummary.self) { CardDetailView(card: $0, env: env) }
         .task {
