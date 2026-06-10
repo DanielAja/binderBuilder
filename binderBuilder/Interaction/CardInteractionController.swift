@@ -133,10 +133,13 @@ final class CardInteractionController {
         let camOrientation = cameraRig.camera.orientation(relativeTo: nil)
         let forward = camOrientation.act(SIMD3<Float>(0, 0, -1))
         let target = camPos + forward * floatDistance
-        // Face the camera, upright: card front (+z) toward the camera, card up
-        // (+y) aligned to WORLD up (projected) so the art reads right way up
-        // regardless of the camera's roll convention.
-        let faceCamera = Self.lookOrientation(forward: -forward, up: SIMD3<Float>(0, 1, 0))
+        // Card front (+z) points from the card toward the camera so we see the
+        // front face from the front (not mirrored from behind). The look basis
+        // lands the art upside-down for this camera, so spin 180 in-plane about
+        // the facing axis (a proper rotation -> upright, still unmirrored).
+        let toCamera = normalize(camPos - target)
+        let faceCamera = Self.lookOrientation(forward: toCamera, up: SIMD3<Float>(0, 1, 0))
+            * simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))
 
         card.components.set(CardFloatComponent(
             mode: .active,
@@ -208,10 +211,7 @@ final class CardInteractionController {
         if length(x) < 1e-5 { x = cross(SIMD3<Float>(1, 0, 0), z) }
         x = normalize(x)
         let y = normalize(cross(z, x))
-        // Roll 180 about the facing axis: empirically the card art reads
-        // upside-down without it (negating x and y is a proper rotation, so
-        // the art rotates rather than mirrors).
-        return simd_quatf(float3x3(-x, -y, z))
+        return simd_quatf(float3x3(x, y, z))
     }
 
     private func axisAngle(_ q: simd_quatf) -> (axis: SIMD3<Float>, angle: Float) {
