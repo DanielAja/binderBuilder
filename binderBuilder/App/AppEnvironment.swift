@@ -17,10 +17,12 @@ final class AppEnvironment {
     private static let log = Logger(subsystem: "com.aja.binderBuilder", category: "AppEnvironment")
 
     let catalog: (any CatalogReading)?
+    let search: CatalogStore
     let userDatabase: UserDatabase
     let settings: SettingsStore
     let collection: CollectionStore
     let binders: BinderStore
+    let prices: PriceStore
     let imageCache: ImageCache
     let textureCache: CardTextureCache
 
@@ -30,13 +32,16 @@ final class AppEnvironment {
     private(set) var isReady = false
 
     init() {
-        catalog = GRDBCatalogDatabase.bundled()
+        let catalogDB = GRDBCatalogDatabase.bundled()
+        catalog = catalogDB
+        search = CatalogStore(catalog: catalogDB)
         let database = (try? UserDatabase.openDefault()) ?? (try! UserDatabase.inMemory())
         userDatabase = database
         settings = SettingsStore()
         let collection = CollectionStore(database: database)
         self.collection = collection
         binders = BinderStore(database: database, catalog: catalog, isOwned: { collection.isOwned($0) })
+        prices = PriceStore(database: database, catalog: catalog, settings: settings)
         let cache = ImageCache.standard()
         imageCache = cache
         textureCache = CardTextureCache(imageCache: cache)

@@ -22,6 +22,8 @@ struct BinderSceneView: View {
     @State private var sceneMode: AppMode
     /// Mirrors the floating card's ref so the toggle bar shows/hides.
     @State private var floatingRef: CardRef?
+    @State private var showingLibrary = false
+    @State private var debugDetail: CardSummary?
 
     init(env: AppEnvironment) {
         self.env = env
@@ -86,7 +88,24 @@ struct BinderSceneView: View {
             )
         }
         .overlay(alignment: .topLeading) { shelfButton }
+        .overlay(alignment: .topTrailing) { libraryButton }
         .overlay(alignment: .bottom) { ownedToggleBar }
+        .sheet(isPresented: $showingLibrary) {
+            LibraryView(env: env)
+        }
+        .sheet(item: $debugDetail) { card in
+            NavigationStack { CardDetailView(card: card, env: env) }
+        }
+        .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("-showLibrary") { showingLibrary = true }
+            if ProcessInfo.processInfo.arguments.contains("-showCardDetail") {
+                Task {
+                    if let detail = try? await env.catalog?.card(id: "base1-4") {
+                        debugDetail = detail.summary
+                    }
+                }
+            }
+        }
         .background(
             LinearGradient(
                 colors: [Color(white: 0.22), Color(white: 0.05)],
@@ -115,6 +134,21 @@ struct BinderSceneView: View {
             .padding(.leading, 16)
             .padding(.top, 12)
         }
+    }
+
+    @ViewBuilder
+    private var libraryButton: some View {
+        Button {
+            showingLibrary = true
+        } label: {
+            Image(systemName: "magnifyingglass")
+                .font(.subheadline.weight(.semibold))
+                .padding(10)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .tint(.white)
+        .padding(.trailing, 16)
+        .padding(.top, 12)
     }
 
     @ViewBuilder
