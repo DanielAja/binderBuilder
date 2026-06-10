@@ -7,10 +7,10 @@
 //  binder card content + texture cache, and owned by a SceneModel so the
 //  deformers (which hold mesh/material state) stay alive.
 //
-//  Gestures: a drag flips pages (or, while a card floats, spins it via
-//  arcball); a spatial tap pulls a card out or returns it. A small control
-//  bar appears while a card floats to toggle its owned state live
-//  (color <-> grayscale) — a temporary stand-in for the full collection UI.
+//  Modes: on the SHELF, a tap opens the standing binder (camera dollies in).
+//  In the OPEN BINDER, a drag flips pages (or spins a floating card via
+//  arcball) and a tap pulls a card out / returns it. A control bar toggles a
+//  floating card's owned state live; a Shelf button returns home.
 //
 
 import RealityKit
@@ -19,12 +19,15 @@ import SwiftUI
 struct BinderSceneView: View {
     let env: AppEnvironment
     @State private var model: SceneModel
+    @State private var sceneMode: AppMode
     /// Mirrors the floating card's ref so the toggle bar shows/hides.
     @State private var floatingRef: CardRef?
 
     init(env: AppEnvironment) {
         self.env = env
-        _model = State(initialValue: SceneModel(content: env.content, textureCache: env.textureCache))
+        let scene = SceneModel(content: env.content, textureCache: env.textureCache)
+        _model = State(initialValue: scene)
+        _sceneMode = State(initialValue: scene.result.modeController?.mode ?? .binderOpen)
     }
 
     var body: some View {
@@ -39,6 +42,7 @@ struct BinderSceneView: View {
                 // spins it (arcball); otherwise it curls a page.
                 DragGesture(minimumDistance: 8)
                     .onChanged { value in
+                        guard sceneMode != .shelf else { return }
                         if model.result.cardInteraction?.isFloating == true {
                             model.result.cardInteraction?.dragChanged(
                                 location: value.location, viewport: proxy.size
@@ -53,6 +57,7 @@ struct BinderSceneView: View {
                         }
                     }
                     .onEnded { value in
+                        guard sceneMode != .shelf else { return }
                         let v = CGSize(width: value.velocity.width, height: value.velocity.height)
                         if model.result.cardInteraction?.isFloating == true {
                             model.result.cardInteraction?.dragEnded(velocity: v, viewport: proxy.size)
@@ -67,11 +72,20 @@ struct BinderSceneView: View {
             .simultaneousGesture(
                 SpatialTapGesture()
                     .onEnded { value in
-                        model.result.cardInteraction?.handleTap(at: value.location, viewport: proxy.size)
+                        if model.result.modeController?.isShelf == true {
+                            let ray = model.result.cameraRig.ray(through: value.location, viewport: proxy.size)
+                            model.result.modeController?.handleShelfTap(
+                                origin: ray.origin, direction: ray.direction
+                            )
+                        } else {
+                            model.result.cardInteraction?.handleTap(at: value.location, viewport: proxy.size)
+                        }
+                        sceneMode = model.result.modeController?.mode ?? sceneMode
                         floatingRef = model.result.cardInteraction?.floatingRef
                     }
             )
         }
+        .overlay(alignment: .topLeading) { shelfButton }
         .overlay(alignment: .bottom) { ownedToggleBar }
         .background(
             LinearGradient(
@@ -81,6 +95,26 @@ struct BinderSceneView: View {
             )
         )
         .ignoresSafeArea()
+    }
+
+    @ViewBuilder
+    private var shelfButton: some View {
+        if sceneMode != .shelf {
+            Button {
+                model.result.modeController?.enterShelf()
+                sceneMode = .shelf
+                floatingRef = nil
+            } label: {
+                Label("Shelf", systemImage: "books.vertical.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(.ultraThinMaterial, in: Capsule())
+            }
+            .tint(.white)
+            .padding(.leading, 16)
+            .padding(.top, 12)
+        }
     }
 
     @ViewBuilder

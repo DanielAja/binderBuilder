@@ -9,6 +9,7 @@
 //
 
 import CoreGraphics
+import Foundation
 import RealityKit
 import simd
 
@@ -34,14 +35,56 @@ final class CameraRig {
         applyBinderOpenFraming()
     }
 
+    /// Named camera framings for the two top-level scenes.
+    enum Framing {
+        /// Open binder lying at the origin.
+        case binderOpen
+        /// Shelf with the standing binder + display cases (binder ~1 m away).
+        case shelf
+
+        var at: SIMD3<Float> {
+            switch self {
+            case .binderOpen: return SIMD3<Float>(0, 0.02, -0.02)
+            case .shelf: return SIMD3<Float>(0, 0.30, 0.05)
+            }
+        }
+        var from: SIMD3<Float> {
+            switch self {
+            case .binderOpen: return SIMD3<Float>(0, 0.78, 0.60)
+            case .shelf: return SIMD3<Float>(0, 0.62, 1.75)
+            }
+        }
+    }
+
     /// Frames the open binder (lying at the origin, ~0.53 m wide) in portrait:
     /// camera above and in front, looking down at ~52 degrees.
     func applyBinderOpenFraming() {
-        camera.look(
-            at: SIMD3<Float>(0, 0.02, -0.02),
-            from: SIMD3<Float>(0, 0.78, 0.60),
-            relativeTo: root
-        )
+        apply(.binderOpen)
+    }
+
+    /// Snaps the camera to a framing immediately.
+    func apply(_ framing: Framing) {
+        camera.look(at: framing.at, from: framing.from, relativeTo: root)
+    }
+
+    /// Smoothly dollies the camera to a framing (scene transition).
+    func animate(to framing: Framing, duration: TimeInterval = 0.7) {
+        let target = Self.lookTransform(at: framing.at, from: framing.from)
+        camera.move(to: target, relativeTo: root, duration: duration, timingFunction: .easeInOut)
+    }
+
+    /// Camera local transform that looks at `at` from `from` (camera faces its
+    /// own -z), matching `Entity.look`.
+    nonisolated static func lookTransform(
+        at: SIMD3<Float>, from: SIMD3<Float>, up: SIMD3<Float> = SIMD3<Float>(0, 1, 0)
+    ) -> Transform {
+        let forward = simd_normalize(at - from)
+        let z = -forward
+        var x = simd_cross(up, z)
+        if simd_length(x) < 1e-5 { x = simd_cross(SIMD3<Float>(1, 0, 0), z) }
+        x = simd_normalize(x)
+        let y = simd_cross(z, x)
+        return Transform(scale: .one, rotation: simd_quatf(simd_float3x3(x, y, z)), translation: from)
     }
 
     /// World-space picking ray through a screen point.

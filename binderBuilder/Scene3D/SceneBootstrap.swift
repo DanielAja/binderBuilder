@@ -28,6 +28,8 @@ struct SceneBootstrapResult {
     let router: GestureRouter?
     /// Card pull-out / inspect / return interaction (tap + arcball drag).
     let cardInteraction: CardInteractionController?
+    /// Shelf <-> binder mode switching + camera transitions.
+    let modeController: SceneModeController?
     /// Device-motion source driving the holo sweep; kept alive by the result.
     let motionProvider: any MotionProvider
     /// "gpu" or "cpu" — what actually got used after any fallback.
@@ -111,6 +113,7 @@ enum SceneBootstrap {
         var controller: BinderFlipController?
         var router: GestureRouter?
         var cardInteraction: CardInteractionController?
+        var modeController: SceneModeController?
         if pages.isEmpty {
             log.fault("No pooled pages could be built; binder is static")
         } else {
@@ -176,6 +179,18 @@ enum SceneBootstrap {
 
         log.info("Page deformer active: \(activeLabel, privacy: .public)")
 
+        // Shelf "home" scene: tap the standing binder to dolly into it.
+        let shelfRig = ShelfSceneBuilder.build()
+        root.addChild(shelfRig.root)
+        let initialMode: AppMode
+        switch launchState.uiState {
+        case .binderOpen, .cardFloating: initialMode = .binderOpen
+        default: initialMode = .shelf
+        }
+        modeController = SceneModeController(
+            mode: initialMode, cameraRig: cameraRig, shelfRoot: shelfRig.root, binderRoot: rig.root
+        )
+
         DebugSceneOverrides.apply(to: root, cameraRig: cameraRig, launchState: launchState)
 
         return SceneBootstrapResult(
@@ -184,6 +199,7 @@ enum SceneBootstrap {
             controller: controller,
             router: router,
             cardInteraction: cardInteraction,
+            modeController: modeController,
             motionProvider: motionProvider,
             activeDeformerLabel: activeLabel
         )
