@@ -16,9 +16,12 @@ struct CardDetailView: View {
     @State private var variant: CardVariant = .normal
     @State private var quotes: [PriceQuote] = []
     @State private var refreshing = false
+    @State private var addingCopy = false
+    @State private var editorCopy: CardCopy?
 
     private var ref: CardRef { CardRef(cardID: card.id, variant: variant) }
     private var owned: Bool { env.collection.isOwned(ref) }
+    private var wished: Bool { env.wishlist.isWished(ref) }
 
     private var variants: [CardVariant] {
         let available = CardVariant.allCases.filter { card.availableVariants.contains($0) }
@@ -65,6 +68,8 @@ struct CardDetailView: View {
                 .tint(owned ? .green : .accentColor)
                 .padding(.horizontal)
 
+                copiesSection
+
                 priceSection
 
                 Link(destination: EbaySoldListingsURL.url(for: card)) {
@@ -79,6 +84,15 @@ struct CardDetailView: View {
         }
         .navigationTitle(card.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { _ = env.wishlist.toggle(ref) } label: {
+                    Image(systemName: wished ? "heart.fill" : "heart").foregroundStyle(.pink)
+                }
+            }
+        }
+        .sheet(isPresented: $addingCopy) { CopyEditorView(ref: ref, env: env) }
+        .sheet(item: $editorCopy) { CopyEditorView(ref: ref, env: env, existing: $0) }
         .onAppear { variant = variants.first ?? .normal }
         .task(id: card.id) {
             quotes = await env.prices.quotes(for: card.id)
@@ -87,6 +101,50 @@ struct CardDetailView: View {
             quotes = await env.prices.quotes(for: card.id)
             refreshing = false
         }
+    }
+
+    @ViewBuilder
+    private var copiesSection: some View {
+        let copies = env.collection.copies(of: ref)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Your copies (\(copies.count))").font(.headline)
+                Spacer()
+                Button { addingCopy = true } label: { Label("Add", systemImage: "plus") }
+                    .font(.subheadline)
+            }
+            if copies.isEmpty {
+                Text("No copies of this printing yet.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                ForEach(copies) { copy in
+                    Button { editorCopy = copy } label: { copyRow(copy) }
+                        .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+    }
+
+    private func copyRow(_ copy: CardCopy) -> some View {
+        HStack {
+            Image(systemName: copy.isGraded ? "seal.fill" : "rectangle.portrait")
+                .foregroundStyle(copy.isGraded ? .yellow : .secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(copy.isGraded ? (copy.grade?.label ?? "Graded") : copy.condition.displayName)
+                if let notes = copy.notes, !notes.isEmpty {
+                    Text(notes).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer()
+            if let price = copy.acquiredPrice {
+                Text(price, format: .currency(code: "USD")).font(.subheadline).foregroundStyle(.secondary)
+            }
+            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder

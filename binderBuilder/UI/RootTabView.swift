@@ -23,6 +23,8 @@ struct RootTabView: View {
         // Debug/deep-link: -uiState binderOpen|cardFloating opens the Binder tab.
         if ProcessInfo.processInfo.arguments.contains("-showSets") {
             _tab = State(initialValue: .browse)
+        } else if ProcessInfo.processInfo.arguments.contains("-showCollection") {
+            _tab = State(initialValue: .collection)
         } else {
             switch DebugLaunchState.current.uiState {
             case .binderOpen, .cardFloating: _tab = State(initialValue: .binder)
