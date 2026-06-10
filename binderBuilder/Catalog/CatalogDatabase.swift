@@ -30,6 +30,8 @@ nonisolated protocol CatalogReading: Sendable {
     func cardFacets(forCardIDs cardIDs: [String]) async throws -> (rarities: [String: Int], types: [String: Int])
     /// Bundled TCGplayer market price per printing (instant collection value).
     func bundledMarket(for refs: [CardRef]) async throws -> [CardRef: Double]
+    /// Card summaries for a set of IDs (e.g. the owned-cards grid).
+    func summaries(forCardIDs cardIDs: [String]) async throws -> [CardSummary]
 }
 
 extension CatalogReading {
@@ -38,6 +40,7 @@ extension CatalogReading {
     func ownedCardCounts(forCardIDs cardIDs: [String]) async throws -> [String: Int] { [:] }
     func cardFacets(forCardIDs cardIDs: [String]) async throws -> (rarities: [String: Int], types: [String: Int]) { ([:], [:]) }
     func bundledMarket(for refs: [CardRef]) async throws -> [CardRef: Double] { [:] }
+    func summaries(forCardIDs cardIDs: [String]) async throws -> [CardSummary] { [] }
 }
 
 nonisolated final class GRDBCatalogDatabase: CatalogReading {
@@ -271,6 +274,27 @@ nonisolated final class GRDBCatalogDatabase: CatalogReading {
                     let ref = CardRef(cardID: row["card_id"], variant: variant)
                     if wanted.contains(ref) { out[ref] = market }
                 }
+            }
+            return out
+        }
+    }
+
+    func summaries(forCardIDs cardIDs: [String]) async throws -> [CardSummary] {
+        guard !cardIDs.isEmpty else { return [] }
+        return try await reader.read { db in
+            var out: [CardSummary] = []
+            for chunk in cardIDs.chunked(into: Self.chunkSize) {
+                let placeholders = databaseQuestionMarks(count: chunk.count)
+                let rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                    SELECT \(Self.summaryColumns)
+                    FROM card
+                    JOIN set_info ON set_info.id = card.set_id
+                    WHERE card.id IN (\(placeholders))
+                    """,
+                    arguments: StatementArguments(chunk))
+                out.append(contentsOf: rows.map(Self.summary(from:)))
             }
             return out
         }

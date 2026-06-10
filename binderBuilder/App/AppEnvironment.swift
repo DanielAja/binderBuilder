@@ -24,6 +24,7 @@ final class AppEnvironment {
     let wishlist: WishlistStore
     let binders: BinderStore
     let prices: PriceStore
+    let stats: CollectionStatsStore
     let imageCache: ImageCache
     let textureCache: CardTextureCache
 
@@ -31,6 +32,15 @@ final class AppEnvironment {
     private(set) var openBinderID: String?
     private(set) var content: BinderCardContent?
     private(set) var isReady = false
+
+    /// The 3D scene, built once and reused across tab switches.
+    @ObservationIgnored private var _scene: SceneModel?
+    var scene: SceneModel {
+        if let _scene { return _scene }
+        let made = SceneModel(content: content, textureCache: textureCache)
+        _scene = made
+        return made
+    }
 
     init() {
         let catalogDB = GRDBCatalogDatabase.bundled()
@@ -44,6 +54,7 @@ final class AppEnvironment {
         wishlist = WishlistStore(database: database)
         binders = BinderStore(database: database, catalog: catalog, isOwned: { collection.isOwned($0) })
         prices = PriceStore(database: database, catalog: catalog, settings: settings)
+        stats = CollectionStatsStore(catalog: catalog, collection: collection, database: database)
         let cache = ImageCache.standard()
         imageCache = cache
         textureCache = CardTextureCache(imageCache: cache)

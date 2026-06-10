@@ -23,7 +23,6 @@ struct BinderSceneView: View {
     @State private var sceneMode: AppMode
     /// Mirrors the floating card's ref so the toggle bar shows/hides.
     @State private var floatingRef: CardRef?
-    @State private var showingLibrary = false
     @State private var debugDetail: CardSummary?
     @State private var debugScan = false
     /// True while a shelf-pan drag is in progress.
@@ -31,7 +30,7 @@ struct BinderSceneView: View {
 
     init(env: AppEnvironment) {
         self.env = env
-        let scene = SceneModel(content: env.content, textureCache: env.textureCache)
+        let scene = env.scene   // cached in AppEnvironment; survives tab switches
         _model = State(initialValue: scene)
         _sceneMode = State(initialValue: scene.result.modeController?.mode ?? .binderOpen)
     }
@@ -50,14 +49,12 @@ struct BinderSceneView: View {
             sceneLayer
             controlsLayer
         }
-        .sheet(isPresented: $showingLibrary) { LibraryView(env: env) }
         .sheet(item: $debugDetail) { card in
             NavigationStack { CardDetailView(card: card, env: env) }
         }
         .sheet(isPresented: $debugScan) { ScanView(env: env) }
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains("-showScan") { debugScan = true }
-            if ProcessInfo.processInfo.arguments.contains("-showLibrary") { showingLibrary = true }
             if ProcessInfo.processInfo.arguments.contains("-showCardDetail") {
                 Task {
                     if let detail = try? await env.catalog?.card(id: "base1-4") {
@@ -140,7 +137,6 @@ struct BinderSceneView: View {
             HStack(alignment: .top) {
                 if sceneMode != .shelf { shelfButton }
                 Spacer()
-                libraryButton
             }
             Spacer()
             ownedToggleBar
@@ -161,18 +157,6 @@ struct BinderSceneView: View {
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 14).padding(.vertical, 9)
                 .background(.ultraThinMaterial, in: Capsule())
-        }
-        .tint(.white)
-    }
-
-    private var libraryButton: some View {
-        Button {
-            showingLibrary = true
-        } label: {
-            Image(systemName: "magnifyingglass")
-                .font(.subheadline.weight(.semibold))
-                .padding(10)
-                .background(.ultraThinMaterial, in: Circle())
         }
         .tint(.white)
     }

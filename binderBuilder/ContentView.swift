@@ -14,7 +14,7 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             if env.isReady {
-                BinderSceneView(env: env)
+                RootTabView(env: env)
             } else {
                 ZStack {
                     LinearGradient(

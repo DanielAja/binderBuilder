@@ -116,7 +116,7 @@ struct CardDetailView: View {
             }
         }
         .padding()
-        .background(Color(white: 0.12), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
     }
 
