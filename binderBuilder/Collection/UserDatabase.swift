@@ -114,6 +114,27 @@ nonisolated final class UserDatabase: Sendable {
             }
             try db.execute(sql: "DROP TABLE owned_card")
         }
+        // v3 — custom collection groups + alert/sync support tables.
+        migrator.registerMigration("v3") { db in
+            try db.execute(sql: """
+                CREATE TABLE card_group (
+                  id TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT NOT NULL,
+                  sort_order INTEGER NOT NULL, created_at REAL NOT NULL
+                );
+                CREATE TABLE group_member (
+                  group_id TEXT NOT NULL REFERENCES card_group(id) ON DELETE CASCADE,
+                  card_id TEXT NOT NULL, variant TEXT NOT NULL,
+                  PRIMARY KEY (group_id, card_id, variant)
+                );
+                CREATE TABLE price_alert (
+                  card_id TEXT NOT NULL, variant TEXT NOT NULL,
+                  kind TEXT NOT NULL, threshold REAL NOT NULL, baseline REAL,
+                  created_at REAL NOT NULL,
+                  PRIMARY KEY (card_id, variant)
+                );
+                CREATE TABLE known_set (set_id TEXT PRIMARY KEY);
+                """)
+        }
         return migrator
     }
 }

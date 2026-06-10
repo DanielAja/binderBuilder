@@ -20,6 +20,8 @@ struct CardDetailView: View {
     @State private var addingCopy = false
     @State private var editorCopy: CardCopy?
     @State private var toast: String?
+    @State private var showNewGroup = false
+    @State private var newGroupName = ""
 
     private var ref: CardRef { CardRef(cardID: card.id, variant: variant) }
     private var owned: Bool { env.collection.isOwned(ref) }
@@ -87,20 +89,46 @@ struct CardDetailView: View {
         .navigationTitle(card.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if !env.binders.binders.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        ForEach(env.binders.binders) { binder in
-                            Button(binder.name) { addToBinder(binder.id) }
-                        }
-                    } label: { Image(systemName: "book") }
-                }
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { _ = env.wishlist.toggle(ref) } label: {
                     Image(systemName: wished ? "heart.fill" : "heart").foregroundStyle(.pink)
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    if !env.binders.binders.isEmpty {
+                        Menu("Add to Binder") {
+                            ForEach(env.binders.binders) { binder in
+                                Button(binder.name) { addToBinder(binder.id) }
+                            }
+                        }
+                    }
+                    Menu("Add to Group") {
+                        ForEach(env.groups.groups) { group in
+                            Button {
+                                _ = env.groups.toggle(ref, group: group.id)
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            } label: {
+                                Label(group.name, systemImage: env.groups.isMember(ref, of: group.id) ? "checkmark" : "circle")
+                            }
+                        }
+                        Divider()
+                        Button { newGroupName = ""; showNewGroup = true } label: {
+                            Label("New Group…", systemImage: "plus")
+                        }
+                    }
+                } label: { Image(systemName: "ellipsis.circle") }
+            }
+        }
+        .alert("New Group", isPresented: $showNewGroup) {
+            TextField("Name", text: $newGroupName)
+            Button("Create") {
+                let name = newGroupName.trimmingCharacters(in: .whitespaces)
+                if let group = env.groups.createGroup(name: name.isEmpty ? "New Group" : name) {
+                    env.groups.setMember(ref, group: group.id, member: true)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
         }
         .overlay(alignment: .bottom) {
             if let toast { Text(toast).font(.subheadline.weight(.semibold))

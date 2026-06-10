@@ -22,6 +22,7 @@ final class AppEnvironment {
     let settings: SettingsStore
     let collection: CollectionStore
     let wishlist: WishlistStore
+    let groups: GroupStore
     let binders: BinderStore
     let prices: PriceStore
     let stats: CollectionStatsStore
@@ -52,6 +53,7 @@ final class AppEnvironment {
         let collection = CollectionStore(database: database)
         self.collection = collection
         wishlist = WishlistStore(database: database)
+        groups = GroupStore(database: database)
         binders = BinderStore(database: database, catalog: catalog, isOwned: { collection.isOwned($0) })
         prices = PriceStore(database: database, catalog: catalog, settings: settings)
         stats = CollectionStatsStore(catalog: catalog, collection: collection, database: database)
