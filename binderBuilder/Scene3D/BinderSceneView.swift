@@ -7,10 +7,11 @@
 //  binder card content + texture cache, and owned by a SceneModel so the
 //  deformers (which hold mesh/material state) stay alive.
 //
-//  Modes: on the SHELF, a tap opens the standing binder (camera dollies in).
-//  In the OPEN BINDER, a drag flips pages (or spins a floating card via
-//  arcball) and a tap pulls a card out / returns it. A control bar toggles a
-//  floating card's owned state live; a Shelf button returns home.
+//  Modes: on the SHELF, a drag orbits the camera around the shelf and a tap
+//  opens the standing binder or a display case. In the OPEN BINDER, a drag
+//  flips pages (or spins a floating card via arcball) and a tap pulls a card
+//  out / returns it. The 3D fills the screen; the controls sit in the safe
+//  area on top.
 //
 
 import RealityKit
@@ -25,6 +26,8 @@ struct BinderSceneView: View {
     @State private var showingLibrary = false
     @State private var debugDetail: CardSummary?
     @State private var debugScan = false
+    /// True while a shelf-pan drag is in progress.
+    @State private var panActive = false
 
     init(env: AppEnvironment) {
         self.env = env
@@ -34,18 +37,58 @@ struct BinderSceneView: View {
     }
 
     var body: some View {
+        ZStack {
+            // Full-bleed backdrop (under the status bar / home indicator).
+            LinearGradient(
+                colors: [Color(white: 0.22), Color(white: 0.05)],
+                startPoint: .top, endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            // 3D + controls live in the safe area so nothing collides with the
+            // status bar; the backdrop shows through the RealityView elsewhere.
+            sceneLayer
+            controlsLayer
+        }
+        .sheet(isPresented: $showingLibrary) { LibraryView(env: env) }
+        .sheet(item: $debugDetail) { card in
+            NavigationStack { CardDetailView(card: card, env: env) }
+        }
+        .sheet(isPresented: $debugScan) { ScanView(env: env) }
+        .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("-showScan") { debugScan = true }
+            if ProcessInfo.processInfo.arguments.contains("-showLibrary") { showingLibrary = true }
+            if ProcessInfo.processInfo.arguments.contains("-showCardDetail") {
+                Task {
+                    if let detail = try? await env.catalog?.card(id: "base1-4") {
+                        debugDetail = detail.summary
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Full-bleed 3D + gestures
+
+    private var sceneLayer: some View {
         GeometryReader { proxy in
             RealityView { content in
                 content.camera = .virtual
                 content.add(model.result.root)
             }
             .gesture(
-                // >0 minimum so a tap never starts a page drag; the tap gesture
-                // below owns pull-out/return. While a card floats, the drag
-                // spins it (arcball); otherwise it curls a page.
+                // >0 minimum so a tap never starts a drag; the tap gesture owns
+                // open/pull-out/return. Shelf: drag orbits the camera. Binder:
+                // drag flips a page or (while a card floats) spins it.
                 DragGesture(minimumDistance: 8)
                     .onChanged { value in
-                        guard sceneMode != .shelf else { return }
+                        if sceneMode == .shelf {
+                            if !panActive { model.result.modeController?.beginShelfPan(); panActive = true }
+                            model.result.modeController?.updateShelfPan(
+                                translation: value.translation, viewport: proxy.size
+                            )
+                            return
+                        }
                         if model.result.cardInteraction?.isFloating == true {
                             model.result.cardInteraction?.dragChanged(
                                 location: value.location, viewport: proxy.size
@@ -60,7 +103,7 @@ struct BinderSceneView: View {
                         }
                     }
                     .onEnded { value in
-                        guard sceneMode != .shelf else { return }
+                        if sceneMode == .shelf { panActive = false; return }
                         let v = CGSize(width: value.velocity.width, height: value.velocity.height)
                         if model.result.cardInteraction?.isFloating == true {
                             model.result.cardInteraction?.dragEnded(velocity: v, viewport: proxy.size)
@@ -88,58 +131,40 @@ struct BinderSceneView: View {
                     }
             )
         }
-        .overlay(alignment: .topLeading) { shelfButton }
-        .overlay(alignment: .topTrailing) { libraryButton }
-        .overlay(alignment: .bottom) { ownedToggleBar }
-        .sheet(isPresented: $showingLibrary) {
-            LibraryView(env: env)
-        }
-        .sheet(item: $debugDetail) { card in
-            NavigationStack { CardDetailView(card: card, env: env) }
-        }
-        .sheet(isPresented: $debugScan) { ScanView(env: env) }
-        .onAppear {
-            if ProcessInfo.processInfo.arguments.contains("-showScan") { debugScan = true }
-            if ProcessInfo.processInfo.arguments.contains("-showLibrary") { showingLibrary = true }
-            if ProcessInfo.processInfo.arguments.contains("-showCardDetail") {
-                Task {
-                    if let detail = try? await env.catalog?.card(id: "base1-4") {
-                        debugDetail = detail.summary
-                    }
-                }
-            }
-        }
-        .background(
-            LinearGradient(
-                colors: [Color(white: 0.22), Color(white: 0.05)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        .ignoresSafeArea()
     }
 
-    @ViewBuilder
+    // MARK: Controls (safe area)
+
+    private var controlsLayer: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                if sceneMode != .shelf { shelfButton }
+                Spacer()
+                libraryButton
+            }
+            Spacer()
+            ownedToggleBar
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 16)
+    }
+
     private var shelfButton: some View {
-        if sceneMode != .shelf {
-            Button {
-                model.result.modeController?.enterShelf()
-                sceneMode = .shelf
-                floatingRef = nil
-            } label: {
-                Label("Shelf", systemImage: "books.vertical.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(.ultraThinMaterial, in: Capsule())
-            }
-            .tint(.white)
-            .padding(.leading, 16)
-            .padding(.top, 12)
+        Button {
+            model.result.modeController?.enterShelf()
+            sceneMode = .shelf
+            floatingRef = nil
+        } label: {
+            Label("Shelf", systemImage: "books.vertical.fill")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(.ultraThinMaterial, in: Capsule())
         }
+        .tint(.white)
     }
 
-    @ViewBuilder
     private var libraryButton: some View {
         Button {
             showingLibrary = true
@@ -150,8 +175,6 @@ struct BinderSceneView: View {
                 .background(.ultraThinMaterial, in: Circle())
         }
         .tint(.white)
-        .padding(.trailing, 16)
-        .padding(.top, 12)
     }
 
     @ViewBuilder
@@ -165,12 +188,10 @@ struct BinderSceneView: View {
                 Label(owned ? "In collection" : "Not in collection",
                       systemImage: owned ? "checkmark.seal.fill" : "circle.dashed")
                     .font(.headline)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 12)
+                    .padding(.horizontal, 18).padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: Capsule())
             }
             .tint(owned ? .green : .secondary)
-            .padding(.bottom, 36)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }

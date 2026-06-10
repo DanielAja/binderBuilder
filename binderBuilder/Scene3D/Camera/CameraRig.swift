@@ -67,6 +67,18 @@ final class CameraRig {
         camera.look(at: framing.at, from: framing.from, relativeTo: root)
     }
 
+    /// Orbits the shelf framing by yaw (around world up) and pitch (around the
+    /// camera's right axis), keeping the shelf focus centered. Used by the
+    /// shelf pan gesture.
+    func setShelfOrbit(yaw: Float, pitch: Float) {
+        let at = Framing.shelf.at
+        let base = Framing.shelf.from - at
+        let qPitch = simd_quatf(angle: pitch, axis: SIMD3<Float>(1, 0, 0))
+        let qYaw = simd_quatf(angle: yaw, axis: SIMD3<Float>(0, 1, 0))
+        let offset = qYaw.act(qPitch.act(base))
+        camera.look(at: at, from: at + offset, relativeTo: root)
+    }
+
     /// Smoothly dollies the camera to a framing (scene transition).
     func animate(to framing: Framing, duration: TimeInterval = 0.7) {
         let target = Self.lookTransform(at: framing.at, from: framing.from)

@@ -28,6 +28,12 @@ final class SceneModeController {
 
     var isShelf: Bool { mode == .shelf }
 
+    // Shelf orbit state (committed) + the values captured at pan-start.
+    private var shelfYaw: Float = 0
+    private var shelfPitch: Float = 0
+    private var panStartYaw: Float = 0
+    private var panStartPitch: Float = 0
+
     init(mode: AppMode, cameraRig: CameraRig, shelfRoot: Entity, binderRoot: Entity) {
         self.mode = mode
         self.cameraRig = cameraRig
@@ -58,11 +64,33 @@ final class SceneModeController {
     func enterShelf() {
         guard mode != .shelf else { return }
         mode = .shelf
+        shelfYaw = 0
+        shelfPitch = 0
         binderRoot.isEnabled = false
         shelfRoot.isEnabled = true
         cameraRig.animate(to: .shelf)
         Self.log.info("Returned to shelf")
     }
+
+    // MARK: Shelf pan (orbit) — touch-drag to look around the shelf.
+
+    /// Captures the orbit baseline at the start of a drag.
+    func beginShelfPan() {
+        panStartYaw = shelfYaw
+        panStartPitch = shelfPitch
+    }
+
+    /// Orbits the camera from the drag translation (absolute, from pan-start).
+    func updateShelfPan(translation: CGSize, viewport: CGSize) {
+        guard mode == .shelf else { return }
+        let w = max(Float(viewport.width), 1), h = max(Float(viewport.height), 1)
+        // Drag spans ~full screen -> comfortable look-around range.
+        shelfYaw = clamp(panStartYaw + Float(translation.width) / w * 1.8, -0.85, 0.85)
+        shelfPitch = clamp(panStartPitch - Float(translation.height) / h * 1.2, -0.30, 0.55)
+        cameraRig.setShelfOrbit(yaw: shelfYaw, pitch: shelfPitch)
+    }
+
+    private func clamp(_ v: Float, _ lo: Float, _ hi: Float) -> Float { min(max(v, lo), hi) }
 
     /// Handles a tap while on the shelf. Returns true if it hit something.
     @discardableResult

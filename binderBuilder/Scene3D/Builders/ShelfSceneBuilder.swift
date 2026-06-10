@@ -60,8 +60,12 @@ enum ShelfSceneBuilder {
         // Closed binder, stood upright on the low slab, front cover to viewer.
         let binder = (try? Entity.load(named: "Binder.usdz")) ?? proceduralBinder()
         binder.name = "ShelfBinder"
-        // Imported lying flat (thickness up); rotate to stand on its long edge.
-        binder.orientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
+        // Imported lying flat (thickness up): stand it on its bottom edge with
+        // the front cover facing the viewer. The 180 in-plane roll corrects the
+        // upside-down result of the stand rotation alone.
+        binder.orientation =
+            simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))
+            * simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
         binder.position = SIMD3<Float>(0, lowSlabTopY + 0.16, slabCenterZ)
         binder.components.set(ShelfTargetComponent(kind: .binder))
         binder.components.set(CollisionComponent(shapes: [
