@@ -10,6 +10,7 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var env = AppEnvironment()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -27,6 +28,16 @@ struct ContentView: View {
                         .foregroundStyle(.white)
                 }
                 .task { await env.prepare() }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, env.isReady { Task { await env.runAlertChecks() } }
+        }
+        .task {
+            // Smoke test: -fireTestAlert requests notifications + fires one.
+            if ProcessInfo.processInfo.arguments.contains("-fireTestAlert") {
+                await NotificationService.requestAuthorization()
+                NotificationService.fire(title: "Binder Builder", body: "Price alerts are working ✅")
             }
         }
     }

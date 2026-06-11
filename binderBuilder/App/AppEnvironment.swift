@@ -25,6 +25,7 @@ final class AppEnvironment {
     let groups: GroupStore
     let binders: BinderStore
     let prices: PriceStore
+    let alerts: AlertStore
     let stats: CollectionStatsStore
     let imageCache: ImageCache
     let textureCache: CardTextureCache
@@ -56,6 +57,7 @@ final class AppEnvironment {
         groups = GroupStore(database: database)
         binders = BinderStore(database: database, catalog: catalog, isOwned: { collection.isOwned($0) })
         prices = PriceStore(database: database, catalog: catalog, settings: settings)
+        alerts = AlertStore(database: database)
         stats = CollectionStatsStore(catalog: catalog, collection: collection, database: database)
         let cache = ImageCache.standard()
         imageCache = cache
@@ -76,7 +78,18 @@ final class AppEnvironment {
         openBinderID = binder.id
         content = await BinderCardContentBuilder.build(binderID: binder.id, store: binders)
         Self.log.info("Prepared binder \(binder.id, privacy: .public) with \(self.content?.sheetCount ?? 0, privacy: .public) sheets")
+        // Seed the "known sets" baseline so new-release alerts only fire for
+        // sets released after this catalog build.
+        if userDatabase.knownSetIDs().isEmpty, let sets = try? await catalog?.allSets() {
+            userDatabase.addKnownSets(sets.map(\.id))
+        }
         isReady = true
+    }
+
+    /// Runs the price-drop + new-release alert checks (on app activation /
+    /// "Check now"). No-op unless the user enabled alerts.
+    func runAlertChecks() async {
+        await AlertChecker(env: self).runAll()
     }
 
     /// Toggles ownership of a card and persists it (drives the live

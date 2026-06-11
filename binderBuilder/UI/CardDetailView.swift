@@ -22,6 +22,11 @@ struct CardDetailView: View {
     @State private var toast: String?
     @State private var showNewGroup = false
     @State private var newGroupName = ""
+    @State private var showAlertEditor = false
+
+    private var currentMarket: Double? {
+        quotes.first { $0.source == .tcgplayer && $0.variant == variant }?.market
+    }
 
     private var ref: CardRef { CardRef(cardID: card.id, variant: variant) }
     private var owned: Bool { env.collection.isOwned(ref) }
@@ -96,6 +101,10 @@ struct CardDetailView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    Button { showAlertEditor = true } label: {
+                        Label(env.alerts.alert(for: ref) != nil ? "Edit Price Alert…" : "Set Price Alert…",
+                              systemImage: env.alerts.alert(for: ref) != nil ? "bell.fill" : "bell")
+                    }
                     if !env.binders.binders.isEmpty {
                         Menu("Add to Binder") {
                             ForEach(env.binders.binders) { binder in
@@ -119,6 +128,9 @@ struct CardDetailView: View {
                     }
                 } label: { Image(systemName: "ellipsis.circle") }
             }
+        }
+        .sheet(isPresented: $showAlertEditor) {
+            AlertEditorView(ref: ref, env: env, currentPrice: currentMarket)
         }
         .alert("New Group", isPresented: $showNewGroup) {
             TextField("Name", text: $newGroupName)

@@ -13,6 +13,8 @@ import Observation
     private enum DefaultsKey {
         static let ebayEnabled = "ebayEnabled"
         static let demoSeeded = "demoSeeded"
+        static let priceAlerts = "priceAlertsEnabled"
+        static let newReleaseAlerts = "newReleaseAlertsEnabled"
     }
 
     private enum KeychainKey {
@@ -33,6 +35,16 @@ import Observation
         didSet { defaults.set(demoSeeded, forKey: DefaultsKey.demoSeeded) }
     }
 
+    /// Notify when a watched card's price drops below its target / %.
+    var priceAlertsEnabled: Bool {
+        didSet { defaults.set(priceAlertsEnabled, forKey: DefaultsKey.priceAlerts) }
+    }
+
+    /// Notify when new sets are released.
+    var newReleaseAlertsEnabled: Bool {
+        didSet { defaults.set(newReleaseAlertsEnabled, forKey: DefaultsKey.newReleaseAlerts) }
+    }
+
     /// eBay application id (client id), Keychain-backed. nil/empty deletes.
     var ebayAppID: String? {
         didSet { writeCredential(ebayAppID, key: KeychainKey.ebayAppID) }
@@ -48,6 +60,8 @@ import Observation
         self.keychain = keychain
         self.ebayEnabled = defaults.bool(forKey: DefaultsKey.ebayEnabled)
         self.demoSeeded = defaults.bool(forKey: DefaultsKey.demoSeeded)
+        self.priceAlertsEnabled = defaults.bool(forKey: DefaultsKey.priceAlerts)
+        self.newReleaseAlertsEnabled = defaults.bool(forKey: DefaultsKey.newReleaseAlerts)
         self.ebayAppID = keychain.string(for: KeychainKey.ebayAppID)
         self.ebayCertID = keychain.string(for: KeychainKey.ebayCertID)
     }

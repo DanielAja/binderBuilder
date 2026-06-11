@@ -38,6 +38,20 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("Price-drop alerts", isOn: $settings.priceAlertsEnabled)
+                Toggle("New release alerts", isOn: $settings.newReleaseAlertsEnabled)
+                Button { Task { await env.runAlertChecks() } } label: {
+                    Label("Check now", systemImage: "arrow.clockwise")
+                }
+            } header: {
+                Text("Alerts")
+            } footer: {
+                Text("Free and on-device, checked when you open the app. Watch a card from its ••• menu → Set Price Alert.")
+            }
+            .onChange(of: settings.priceAlertsEnabled) { _, on in if on { Task { await NotificationService.requestAuthorization() } } }
+            .onChange(of: settings.newReleaseAlertsEnabled) { _, on in if on { Task { await NotificationService.requestAuthorization() } } }
+
+            Section {
                 Button {
                     if let data = try? BackupService.export(env.userDatabase) {
                         exportDocument = BackupDocument(data: data); exporting = true
