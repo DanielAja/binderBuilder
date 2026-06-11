@@ -92,7 +92,7 @@ struct CollectionView: View {
         } else if groupBy == .none {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(cards) { card in NavigationLink(value: card) { tile(card) }.buttonStyle(.plain) }
+                    ForEach(cards) { card in NavigationLink(value: card) { tile(card) }.buttonStyle(.pressable) }
                 }.padding(12)
             }
         } else {
@@ -101,7 +101,7 @@ struct CollectionView: View {
                     ForEach(sections(cards), id: \.title) { group in
                         SwiftUI.Section {
                             LazyVGrid(columns: columns, spacing: 12) {
-                                ForEach(group.cards) { card in NavigationLink(value: card) { tile(card) }.buttonStyle(.plain) }
+                                ForEach(group.cards) { card in NavigationLink(value: card) { tile(card) }.buttonStyle(.pressable) }
                             }
                         } header: {
                             Text("\(group.title)  ·  \(group.cards.count)")
@@ -153,7 +153,7 @@ struct CollectionView: View {
                             CardImageView(cardID: card.id, imageBase: card.imageBase, quality: .low,
                                           owned: false, imageCache: env.imageCache)
                                 .overlay(alignment: .topTrailing) { Image(systemName: "heart.fill").foregroundStyle(.pink).padding(5) }
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(.pressable)
                     }
                 }.padding(12)
             }
@@ -259,7 +259,7 @@ struct GroupDetailView: View {
                             NavigationLink(value: card) {
                                 CardImageView(cardID: card.id, imageBase: card.imageBase, quality: .low,
                                               owned: true, imageCache: env.imageCache)
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(.pressable)
                         }
                     }.padding(12)
                 }

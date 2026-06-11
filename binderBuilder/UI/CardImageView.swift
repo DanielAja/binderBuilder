@@ -29,8 +29,8 @@ struct CardImageView: View {
             } else {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color(white: 0.16))
-                    .overlay(ProgressView().tint(.white.opacity(0.5)))
                     .aspectRatio(63.0 / 88.0, contentMode: .fit)
+                    .shimmering()
             }
         }
         .task(id: cardID) {

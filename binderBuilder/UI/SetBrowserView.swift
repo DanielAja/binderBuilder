@@ -131,9 +131,9 @@ struct SetCardsView: View {
             LazyVGrid(columns: columns, spacing: 12) {
                 ForEach(shown) { card in
                     if quickAdd {
-                        Button { toggleOwned(card) } label: { tile(card) }.buttonStyle(.plain)
+                        Button { toggleOwned(card) } label: { tile(card) }.buttonStyle(.pressable)
                     } else {
-                        NavigationLink(value: card) { tile(card) }.buttonStyle(.plain)
+                        NavigationLink(value: card) { tile(card) }.buttonStyle(.pressable)
                     }
                 }
             }
@@ -156,15 +156,18 @@ struct SetCardsView: View {
         }
         .overlay {
             if celebrate {
-                VStack(spacing: 8) {
-                    Image(systemName: "checkmark.seal.fill").font(.system(size: 56)).foregroundStyle(.green)
-                    Text("Set Complete! 🎉").font(.title2.bold())
-                    Text(set.name).foregroundStyle(.secondary)
+                ZStack {
+                    ConfettiView()
+                    VStack(spacing: 8) {
+                        Image(systemName: "checkmark.seal.fill").font(.system(size: 56)).foregroundStyle(.green)
+                        Text("Set Complete! 🎉").font(.title2.bold())
+                        Text(set.name).foregroundStyle(.secondary)
+                    }
+                    .padding(28)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+                    .shadow(radius: 20)
+                    .transition(.scale.combined(with: .opacity))
                 }
-                .padding(28)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
-                .shadow(radius: 20)
-                .transition(.scale.combined(with: .opacity))
             }
         }
     }

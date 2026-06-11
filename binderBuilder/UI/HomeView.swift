@@ -13,8 +13,11 @@ struct HomeView: View {
     let env: AppEnvironment
     @Binding var selectedTab: RootTab
     @State private var showingScan = false
+    @State private var shownValue = 0.0
 
     private var stats: CollectionStatsStore { env.stats }
+
+    private func animateValue() { withAnimation(.easeOut(duration: 0.7)) { shownValue = stats.totalValue } }
 
     var body: some View {
         NavigationStack {
@@ -33,7 +36,8 @@ struct HomeView: View {
             .navigationDestination(for: CardSummary.self) { CardDetailView(card: $0, env: env) }
             .navigationDestination(for: SetInfo.self) { SetCardsView(set: $0, env: env) }
             .sheet(isPresented: $showingScan) { ScanView(env: env) }
-            .task { await stats.refreshIfNeeded() }
+            .task { await stats.refreshIfNeeded(); animateValue() }
+            .onChange(of: stats.totalValue) { _, _ in animateValue() }
             .refreshable { await stats.refresh() }
         }
     }
@@ -43,9 +47,9 @@ struct HomeView: View {
     private var valueCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Collection Value").font(.subheadline).foregroundStyle(.secondary)
-            Text(stats.totalValue, format: .currency(code: "USD"))
+            Text(shownValue, format: .currency(code: "USD"))
                 .font(.system(size: 40, weight: .bold, design: .rounded))
-                .contentTransition(.numericText())
+                .contentTransition(.numericText(value: shownValue))
             HStack(spacing: 12) {
                 Text("Raw \(stats.rawValue.formatted(.currency(code: "USD")))")
                     .font(.caption).foregroundStyle(.secondary)
@@ -87,7 +91,7 @@ struct HomeView: View {
                 HStack(spacing: 14) {
                     ForEach(stats.setProgress.prefix(8)) { p in
                         NavigationLink(value: p.setInfo) { SetProgressCard(progress: p) }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.pressable)
                     }
                 }
             }
@@ -108,7 +112,7 @@ struct HomeView: View {
                                     .font(.caption2.bold()).foregroundStyle(.green)
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.pressable)
                     }
                 }
             }
@@ -125,7 +129,7 @@ struct HomeView: View {
                                           quality: .low, imageCache: env.imageCache)
                                 .frame(width: 80, height: 112)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.pressable)
                     }
                 }
             }
