@@ -27,6 +27,7 @@ final class AppEnvironment {
     let prices: PriceStore
     let alerts: AlertStore
     let stats: CollectionStatsStore
+    let cloud: CloudSyncService
     let imageCache: ImageCache
     let textureCache: CardTextureCache
 
@@ -58,6 +59,7 @@ final class AppEnvironment {
         binders = BinderStore(database: database, catalog: catalog, isOwned: { collection.isOwned($0) })
         prices = PriceStore(database: database, catalog: catalog, settings: settings)
         alerts = AlertStore(database: database)
+        cloud = CloudSyncService(database: database)
         stats = CollectionStatsStore(catalog: catalog, collection: collection, database: database)
         let cache = ImageCache.standard()
         imageCache = cache

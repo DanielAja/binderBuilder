@@ -22,13 +22,19 @@ struct BackupData: Codable {
     struct Binder: Codable { var id, name, coverColor: String; var pageCount, sortOrder: Int; var createdAt: Double }
     struct Slot: Codable { var binderID: String; var pageIndex, side, slotIndex: Int; var cardID, variant: String }
     struct Display: Codable { var position: Int; var cardID, variant: String }
+    struct Group: Codable { var id, name, color: String; var sortOrder: Int; var createdAt: Double }
+    struct Member: Codable { var groupID, cardID, variant: String }
+    struct Alert: Codable { var cardID, variant, kind: String; var threshold: Double; var baseline: Double?; var createdAt: Double }
 
-    var version = 1
+    var version = 2
     var copies: [Copy] = []
     var wishes: [Wish] = []
     var binders: [Binder] = []
     var slots: [Slot] = []
     var displays: [Display] = []
+    var groups: [Group] = []
+    var members: [Member] = []
+    var alerts: [Alert] = []
 }
 
 enum BackupService {
@@ -56,6 +62,18 @@ enum BackupService {
             out.displays = try Row.fetchAll(db, sql: "SELECT * FROM display_case").map {
                 .init(position: $0["position"], cardID: $0["card_id"], variant: $0["variant"])
             }
+            out.groups = try Row.fetchAll(db, sql: "SELECT * FROM card_group").map {
+                .init(id: $0["id"], name: $0["name"], color: $0["color"],
+                      sortOrder: $0["sort_order"], createdAt: $0["created_at"] as Double? ?? 0)
+            }
+            out.members = try Row.fetchAll(db, sql: "SELECT * FROM group_member").map {
+                .init(groupID: $0["group_id"], cardID: $0["card_id"], variant: $0["variant"])
+            }
+            out.alerts = try Row.fetchAll(db, sql: "SELECT * FROM price_alert").map {
+                .init(cardID: $0["card_id"], variant: $0["variant"], kind: $0["kind"],
+                      threshold: $0["threshold"], baseline: $0["baseline"],
+                      createdAt: $0["created_at"] as Double? ?? 0)
+            }
             return out
         }
         let encoder = JSONEncoder()
@@ -67,7 +85,8 @@ enum BackupService {
     static func restore(_ jsonData: Data, into database: UserDatabase) throws {
         let backup = try JSONDecoder().decode(BackupData.self, from: jsonData)
         try database.queue.write { db in
-            for table in ["card_copy", "wishlist", "slot_assignment", "display_case", "binder"] {
+            for table in ["card_copy", "wishlist", "slot_assignment", "display_case",
+                          "group_member", "card_group", "price_alert", "binder"] {
                 try db.execute(sql: "DELETE FROM \(table)")
             }
             for b in backup.binders {
@@ -96,6 +115,21 @@ enum BackupService {
             for d in backup.displays {
                 try db.execute(sql: "INSERT INTO display_case (position, card_id, variant) VALUES (?,?,?)",
                                arguments: [d.position, d.cardID, d.variant])
+            }
+            for g in backup.groups {
+                try db.execute(
+                    sql: "INSERT INTO card_group (id, name, color, sort_order, created_at) VALUES (?,?,?,?,?)",
+                    arguments: [g.id, g.name, g.color, g.sortOrder, g.createdAt])
+            }
+            for m in backup.members {
+                try db.execute(
+                    sql: "INSERT OR IGNORE INTO group_member (group_id, card_id, variant) VALUES (?,?,?)",
+                    arguments: [m.groupID, m.cardID, m.variant])
+            }
+            for a in backup.alerts {
+                try db.execute(
+                    sql: "INSERT OR IGNORE INTO price_alert (card_id, variant, kind, threshold, baseline, created_at) VALUES (?,?,?,?,?,?)",
+                    arguments: [a.cardID, a.variant, a.kind, a.threshold, a.baseline, a.createdAt])
             }
         }
     }

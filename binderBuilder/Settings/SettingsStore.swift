@@ -15,6 +15,7 @@ import Observation
         static let demoSeeded = "demoSeeded"
         static let priceAlerts = "priceAlertsEnabled"
         static let newReleaseAlerts = "newReleaseAlertsEnabled"
+        static let icloudSync = "icloudSyncEnabled"
     }
 
     private enum KeychainKey {
@@ -45,6 +46,11 @@ import Observation
         didSet { defaults.set(newReleaseAlertsEnabled, forKey: DefaultsKey.newReleaseAlerts) }
     }
 
+    /// Back up the collection to the user's iCloud (CloudKit).
+    var icloudSyncEnabled: Bool {
+        didSet { defaults.set(icloudSyncEnabled, forKey: DefaultsKey.icloudSync) }
+    }
+
     /// eBay application id (client id), Keychain-backed. nil/empty deletes.
     var ebayAppID: String? {
         didSet { writeCredential(ebayAppID, key: KeychainKey.ebayAppID) }
@@ -62,6 +68,7 @@ import Observation
         self.demoSeeded = defaults.bool(forKey: DefaultsKey.demoSeeded)
         self.priceAlertsEnabled = defaults.bool(forKey: DefaultsKey.priceAlerts)
         self.newReleaseAlertsEnabled = defaults.bool(forKey: DefaultsKey.newReleaseAlerts)
+        self.icloudSyncEnabled = defaults.bool(forKey: DefaultsKey.icloudSync)
         self.ebayAppID = keychain.string(for: KeychainKey.ebayAppID)
         self.ebayCertID = keychain.string(for: KeychainKey.ebayCertID)
     }

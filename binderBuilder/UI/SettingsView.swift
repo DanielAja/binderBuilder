@@ -16,6 +16,17 @@ struct SettingsView: View {
     @State private var exportDocument: BackupDocument?
     @State private var importing = false
     @State private var statusMessage: String?
+    @State private var cloudRestored = false
+
+    private var cloudStatusText: String? {
+        switch env.cloud.status {
+        case .idle: return nil
+        case .syncing: return "Syncing…"
+        case .synced(let date): return "Last synced \(date.formatted(date: .abbreviated, time: .shortened))"
+        case .unavailable(let msg): return msg
+        case .failed(let msg): return "Sync failed: \(msg)"
+        }
+    }
 
     var body: some View {
         @Bindable var settings = env.settings
@@ -65,6 +76,27 @@ struct SettingsView: View {
             } footer: {
                 Text("Export a JSON backup of your collection, binders, and wishlist, or import one. Importing replaces your current data — relaunch the app afterward.")
             }
+
+            Section {
+                Toggle("iCloud Sync", isOn: $settings.icloudSyncEnabled)
+                Button { Task { await env.cloud.push() } } label: {
+                    Label("Back up to iCloud now", systemImage: "icloud.and.arrow.up")
+                }
+                Button { Task { if await env.cloud.restoreFromCloud() { cloudRestored = true } } } label: {
+                    Label("Restore from iCloud", systemImage: "icloud.and.arrow.down")
+                }
+                if let line = cloudStatusText {
+                    Text(line).font(.caption).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("iCloud")
+            } footer: {
+                Text("Backs up your whole collection to your private iCloud. Restore replaces local data — relaunch to load it.")
+            }
+            .onChange(of: settings.icloudSyncEnabled) { _, on in if on { Task { await env.cloud.push() } } }
+            .alert("Restored from iCloud", isPresented: $cloudRestored) {
+                Button("OK", role: .cancel) {}
+            } message: { Text("Relaunch the app to load your synced collection.") }
 
             Section("About") {
                 LabeledContent("Card data", value: "TCGdex (MIT)")

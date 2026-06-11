@@ -31,7 +31,9 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active, env.isReady { Task { await env.runAlertChecks() } }
+            guard env.isReady else { return }
+            if phase == .active { Task { await env.runAlertChecks() } }
+            if phase == .background, env.settings.icloudSyncEnabled { Task { await env.cloud.push() } }
         }
         .task {
             // Smoke test: -fireTestAlert requests notifications + fires one.

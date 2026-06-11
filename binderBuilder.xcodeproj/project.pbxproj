@@ -352,6 +352,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
+				CODE_SIGN_ENTITLEMENTS = binderBuilder.entitlements;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aja.binderBuilder;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -396,6 +397,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
+				CODE_SIGN_ENTITLEMENTS = binderBuilder.entitlements;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aja.binderBuilder;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

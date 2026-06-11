@@ -48,4 +48,28 @@ import Testing
         #expect(binders2.firstEmptySlot(binderID: binder.id) ==
                 SlotLocation(binderID: binder.id, pageIndex: 0, side: .front, slotIndex: 1))
     }
+
+    @Test func backupIncludesGroupsAndAlerts() throws {
+        let user = try UserDatabase.inMemory()
+        let groups = GroupStore(database: user)
+        let alerts = AlertStore(database: user)
+        let holo = CardRef(cardID: "base1-4", variant: .holo)
+
+        let g = try #require(groups.createGroup(name: "Vintage"))
+        groups.setMember(holo, group: g.id, member: true)
+        alerts.setAlert(holo, kind: .percentDrop, threshold: 15, baseline: 400)
+
+        let data = try BackupService.export(user)
+        try user.queue.write { db in
+            for t in ["group_member", "card_group", "price_alert"] { try db.execute(sql: "DELETE FROM \(t)") }
+        }
+        try BackupService.restore(data, into: user)
+
+        let groups2 = GroupStore(database: user)
+        #expect(groups2.groups.first?.name == "Vintage")
+        #expect(groups2.isMember(holo, of: g.id))
+        let alerts2 = AlertStore(database: user)
+        #expect(alerts2.alert(for: holo)?.kind == .percentDrop)
+        #expect(alerts2.alert(for: holo)?.baseline == 400)
+    }
 }
