@@ -29,7 +29,7 @@ struct RootTabView: View {
             _tab = State(initialValue: .settings)
         } else {
             switch DebugLaunchState.current.uiState {
-            case .binderOpen, .cardFloating: _tab = State(initialValue: .binder)
+            case .binderOpen, .cardFloating, .shelf: _tab = State(initialValue: .binder)
             default: _tab = State(initialValue: .home)
             }
         }

@@ -48,6 +48,10 @@ enum ShelfSceneBuilder {
         let root = Entity()
         root.name = "ShelfRoot"
 
+        // Room backdrop (the wall the shelf hangs on + a floor) so the shelf
+        // sits in a setting rather than floating in a gradient.
+        root.addChild(makeRoomBackdrop())
+
         // Shelf furniture.
         if let shelf = try? Entity.load(named: "Shelf.usdz") {
             shelf.name = "Shelf"
@@ -93,6 +97,56 @@ enum ShelfSceneBuilder {
         }
 
         return ShelfRig(root: root, binder: binder, displaySlots: slots)
+    }
+
+    // MARK: Room backdrop
+
+    /// A back wall (with a soft top-down light gradient) the shelf hangs on,
+    /// plus a wood floor — turns the shelf into a room scene.
+    private static func makeRoomBackdrop() -> Entity {
+        let room = Entity()
+        room.name = "ShelfRoom"
+
+        var wallMat = PhysicallyBasedMaterial()
+        if let tex = wallTexture() {
+            wallMat.baseColor = .init(tint: .white, texture: .init(tex))
+        } else {
+            wallMat.baseColor = .init(tint: UIColor(red: 0.52, green: 0.48, blue: 0.45, alpha: 1))
+        }
+        wallMat.roughness = 0.96
+        let wall = ModelEntity(mesh: .generatePlane(width: 5.0, height: 3.6), materials: [wallMat])
+        wall.name = "ShelfWall"
+        wall.position = SIMD3<Float>(0, 1.3, -0.06)
+        room.addChild(wall)
+
+        var floorMat = PhysicallyBasedMaterial()
+        floorMat.baseColor = .init(tint: UIColor(red: 0.33, green: 0.23, blue: 0.15, alpha: 1))
+        floorMat.roughness = 0.7
+        let floor = ModelEntity(mesh: .generatePlane(width: 5.0, depth: 4.0), materials: [floorMat])
+        floor.name = "ShelfFloor"
+        floor.position = SIMD3<Float>(0, -0.012, 0.9)
+        room.addChild(floor)
+
+        return room
+    }
+
+    /// Warm wall colour with a gentle vertical light falloff for depth.
+    private static func wallTexture() -> TextureResource? {
+        let w = 16, h = 256
+        guard let ctx = CGContext(
+            data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        for y in 0..<h {
+            // Cool, soft wall with a gentle light falloff — contrasts the warm
+            // wood shelf so it pops. (Cooler/lighter near the top.)
+            let t = Double(y) / Double(h - 1)
+            let shade = 0.46 + 0.20 * t
+            ctx.setFillColor(UIColor(red: shade * 0.92, green: shade * 0.97, blue: shade * 1.08, alpha: 1).cgColor)
+            ctx.fill(CGRect(x: 0, y: y, width: w, height: 1))
+        }
+        guard let image = ctx.makeImage() else { return nil }
+        return try? TextureResource(image: image, options: .init(semantic: .color))
     }
 
     // MARK: Procedural fallbacks
