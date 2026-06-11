@@ -15,12 +15,19 @@
 
 import CoreGraphics
 import RealityKit
+import UIKit
 import simd
 
 @MainActor
 final class CardInteractionController {
     private let root: Entity
     private let cameraRig: CameraRig
+
+    // Touch haptics for handling the floating card.
+    private let softHaptic = UIImpactFeedbackGenerator(style: .soft)
+    private let rigidHaptic = UIImpactFeedbackGenerator(style: .rigid)
+    /// Accumulated rotation (radians) since the last haptic "tick".
+    private var rotationSinceTick: Float = 0
 
     private(set) weak var floatingCard: ModelEntity?
     var isFloating: Bool { floatingCard != nil }
@@ -63,6 +70,13 @@ final class CardInteractionController {
     func pullOutFirstAvailable(yawDegrees: Float? = nil) {
         guard let card = collectCards().first else { return }
         pullOut(card)
+        // Debug only: zero the foil so text is legible in verification shots.
+        if ProcessInfo.processInfo.arguments.contains("-noHolo"),
+           var model = card.components[ModelComponent.self],
+           var mat = model.materials.first as? CustomMaterial {
+            var v = mat.custom.value; v.x = 0; mat.custom.value = v
+            model.materials[0] = mat; card.components.set(model)
+        }
         if let yawDegrees, var f = card.components[CardFloatComponent.self] {
             let yaw = simd_quatf(angle: yawDegrees * .pi / 180, axis: SIMD3<Float>(0, 1, 0))
             f.targetOrientation = f.targetOrientation * yaw
@@ -74,18 +88,33 @@ final class CardInteractionController {
 
     func dragChanged(location: CGPoint, viewport: CGSize) {
         guard let card = floatingCard else { return }
+        let camOrientation = cameraRig.camera.orientation(relativeTo: nil)
         if dragStart == nil {
             dragStart = location
             lastDragPoint = location
             dragStartOrientation = card.orientation
+            rotationSinceTick = 0
+            softHaptic.prepare()
+            rigidHaptic.prepare()
+            softHaptic.impactOccurred(intensity: 0.6)   // "picked it up"
             if var f = card.components[CardFloatComponent.self] {
                 f.userControlled = true
                 f.spin = .zero
                 card.components.set(f)
             }
         }
-        guard let start = dragStart, let base = dragStartOrientation else { return }
-        let camOrientation = cameraRig.camera.orientation(relativeTo: nil)
+        guard let start = dragStart, let base = dragStartOrientation, let last = lastDragPoint else { return }
+
+        // Soft tick every ~18° of rotation, so spinning the card feels textured.
+        let step = Arcball.worldRotation(start: last, current: location, viewport: viewport,
+                                         cameraOrientation: camOrientation)
+        rotationSinceTick += axisAngle(step).angle
+        if rotationSinceTick >= 0.32 {
+            softHaptic.impactOccurred(intensity: 0.4)
+            softHaptic.prepare()
+            rotationSinceTick = 0
+        }
+
         let q = Arcball.worldRotation(
             start: start, current: location, viewport: viewport, cameraOrientation: camOrientation
         )
@@ -111,6 +140,11 @@ final class CardInteractionController {
         f.userControlled = false
         f.spin = angle > 1e-4 ? axis * (angle / Float(dt0)) : .zero
         card.components.set(f)
+        // A release "flick" thump scaled to how hard it was spun.
+        let spinMag = length(f.spin)
+        if spinMag > 0.4 {
+            rigidHaptic.impactOccurred(intensity: CGFloat(min(1, spinMag / 12)))
+        }
         resetDrag()
     }
 
@@ -133,13 +167,23 @@ final class CardInteractionController {
         let camOrientation = cameraRig.camera.orientation(relativeTo: nil)
         let forward = camOrientation.act(SIMD3<Float>(0, 0, -1))
         let target = camPos + forward * floatDistance
-        // Card front (+z) points from the card toward the camera so we see the
-        // front face from the front (not mirrored from behind). The look basis
-        // lands the art upside-down for this camera, so spin 180 in-plane about
-        // the facing axis (a proper rotation -> upright, still unmirrored).
+
+        // The seated card already renders correctly (upright, un-mirrored), so
+        // rotate that exact world orientation by the MINIMAL rotation that turns
+        // its front (+z) to face the camera. A pure rotation can't mirror or
+        // flip it — it just stands the card up toward the viewer.
+        let seated = card.orientation(relativeTo: nil)
+        let cardFront = seated.act(SIMD3<Float>(0, 0, 1))
         let toCamera = normalize(camPos - target)
-        let faceCamera = Self.lookOrientation(forward: toCamera, up: SIMD3<Float>(0, 1, 0))
-            * simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))
+        let faceCamera: simd_quatf
+        let axis = cross(cardFront, toCamera)
+        let axisLen = length(axis)
+        if axisLen > 1e-5 {
+            let angle = acos(max(-1, min(1, dot(cardFront, toCamera))))
+            faceCamera = simd_quatf(angle: angle, axis: axis / axisLen) * seated
+        } else {
+            faceCamera = seated
+        }
 
         card.components.set(CardFloatComponent(
             mode: .active,
@@ -149,6 +193,7 @@ final class CardInteractionController {
             targetOrientation: faceCamera
         ))
         floatingCard = card
+        softHaptic.impactOccurred(intensity: 0.7)   // pops out of the sleeve
     }
 
     private func returnCard() {
@@ -167,6 +212,7 @@ final class CardInteractionController {
         card.components.set(f)
         floatingCard = nil
         resetDrag()
+        softHaptic.impactOccurred(intensity: 0.45)   // slides back into the sleeve
     }
 
     // MARK: Picking
@@ -199,19 +245,6 @@ final class CardInteractionController {
         }
         walk(root)
         return out
-    }
-
-    /// Orientation whose local +z points along `forward` and local +y aligns
-    /// with `up` — a card "look at the camera, upright" basis. Built from
-    /// orthonormal columns; verified against the scene so the card art reads
-    /// right way up and front-facing.
-    static func lookOrientation(forward: SIMD3<Float>, up: SIMD3<Float>) -> simd_quatf {
-        let z = normalize(forward)
-        var x = cross(up, z)
-        if length(x) < 1e-5 { x = cross(SIMD3<Float>(1, 0, 0), z) }
-        x = normalize(x)
-        let y = normalize(cross(z, x))
-        return simd_quatf(float3x3(x, y, z))
     }
 
     private func axisAngle(_ q: simd_quatf) -> (axis: SIMD3<Float>, angle: Float) {

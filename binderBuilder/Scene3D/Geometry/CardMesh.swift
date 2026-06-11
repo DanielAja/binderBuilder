@@ -61,7 +61,11 @@ enum CardMesh {
         var frontUVs: [SIMD2<Float>] = [SIMD2(0.5, 0.5)]
         for vertex in outline {
             frontPositions.append(SIMD3(vertex.position.x, vertex.position.y, halfT))
-            frontUVs.append(frontUV(for: vertex.position))
+            // Flip V: CardSurface.metal also flips v, and the net of both made
+            // the art render upside-down on every card. One flip here lands the
+            // image upright (card top -> image top).
+            let uv = frontUV(for: vertex.position)
+            frontUVs.append(SIMD2(uv.x, 1 - uv.y))
         }
         var frontIndices: [UInt32] = []
         frontIndices.reserveCapacity(n * 3)
