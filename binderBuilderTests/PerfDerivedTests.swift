@@ -57,6 +57,15 @@ import Testing
         #expect(SetBrowserView.flatSorted([sv, base], sort: .name).map(\.id) == ["base1", "sv1"])
     }
 
+    @Test func tileAccessibilityLabel() {
+        let ref = CardRef(cardID: "x", variant: .normal)
+        #expect(CollectionView.tileLabel("Charizard", copies: [CardCopy(ref: ref, condition: .nm)]) == "Charizard")
+        let two = [CardCopy(ref: ref, condition: .nm), CardCopy(ref: ref, condition: .lp)]
+        #expect(CollectionView.tileLabel("Pikachu", copies: two) == "Pikachu, 2 copies")
+        let graded = [CardCopy(ref: ref, condition: .nm, grade: CardGrade(company: .psa, value: 10))]
+        #expect(CollectionView.tileLabel("Mew", copies: graded) == "Mew, graded")
+    }
+
     @Test func collectionStoreLoadsAsync() async throws {
         let db = try UserDatabase.inMemory()
         let writer = CollectionStore(database: db)

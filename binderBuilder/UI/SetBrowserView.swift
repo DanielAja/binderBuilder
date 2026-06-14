@@ -124,6 +124,7 @@ struct SetCardsView: View {
     @State private var filter: OwnFilter = .all
     @State private var quickAdd = false
     @State private var celebrate = false
+    @State private var confirmMarkAll = false
     @ScaledMetric(relativeTo: .largeTitle) private var sealSize: CGFloat = 56
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -168,9 +169,16 @@ struct SetCardsView: View {
                 Menu {
                     Toggle(isOn: $quickAdd) { Label("Quick Add (tap to own)", systemImage: "hand.tap") }
                     Divider()
-                    Button { markAllOwned() } label: { Label("Mark all owned", systemImage: "checkmark.circle") }
+                    Button { confirmMarkAll = true } label: { Label("Mark all owned", systemImage: "checkmark.circle") }
                 } label: { Image(systemName: "ellipsis.circle") }
+                .accessibilityLabel("Set options")
             }
+        }
+        .confirmationDialog("Mark all owned?", isPresented: $confirmMarkAll, titleVisibility: .visible) {
+            Button("Mark \(cards.count) cards owned") { markAllOwned() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Adds a copy of every card in \(set.name) you don't already own.")
         }
         .task(id: set.id) {
             cards = (try? await env.catalog?.cards(inSet: set.id)) ?? []

@@ -185,6 +185,16 @@ struct CollectionView: View {
                     Image(systemName: "seal.fill").foregroundStyle(.yellow).padding(5)
                 }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Self.tileLabel(card.name, copies: copies))
+    }
+
+    /// VoiceOver label for a collection tile, e.g. "Charizard, 2 copies, graded".
+    nonisolated static func tileLabel(_ name: String, copies: [CardCopy]) -> String {
+        var parts = [name]
+        if copies.count > 1 { parts.append("\(copies.count) copies") }
+        if copies.contains(where: \.isGraded) { parts.append("graded") }
+        return parts.joined(separator: ", ")
     }
 
     // MARK: Data

@@ -17,6 +17,7 @@ struct BinderManagerView: View {
     @State private var renaming: Binder?
     @State private var renameText = ""
     @State private var showingScan = false
+    @State private var pendingDelete: Binder?
 
     var body: some View {
         List {
@@ -43,13 +44,25 @@ struct BinderManagerView: View {
                     }
                     .contextMenu {
                         Button("Rename") { renaming = binder; renameText = binder.name }
-                        Button("Delete", role: .destructive) { env.binders.deleteBinder(binder.id) }
+                        Button("Delete", role: .destructive) { pendingDelete = binder }
                     }
                 }
                 .onDelete { offsets in
-                    for index in offsets { env.binders.deleteBinder(env.binders.binders[index].id) }
+                    if let index = offsets.first { pendingDelete = env.binders.binders[index] }
                 }
             }
+        }
+        .confirmationDialog("Delete binder?",
+                            isPresented: Binding(get: { pendingDelete != nil },
+                                                 set: { if !$0 { pendingDelete = nil } }),
+                            titleVisibility: .visible) {
+            Button("Delete \(pendingDelete?.name ?? "")", role: .destructive) {
+                if let id = pendingDelete?.id { env.binders.deleteBinder(id) }
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text("This removes the binder and its card placements. Your owned cards stay in your collection.")
         }
         .navigationTitle("Binders")
         .toolbar {

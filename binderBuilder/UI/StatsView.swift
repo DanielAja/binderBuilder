@@ -83,7 +83,11 @@ struct StatsView: View {
                         .frame(width: geo.size.width * CGFloat(entry.value) / CGFloat(maxCount))
                 }
                 .frame(height: 6)
+                .accessibilityHidden(true)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(entry.key)
+            .accessibilityValue("\(entry.value)")
         }
     }
 }

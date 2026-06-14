@@ -15,10 +15,14 @@ struct HomeView: View {
     @State private var showingScan = false
     @State private var shownValue = 0.0
     @ScaledMetric(relativeTo: .largeTitle) private var valueFontSize: CGFloat = 40
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var stats: CollectionStatsStore { env.stats }
 
-    private func animateValue() { withAnimation(.easeOut(duration: 0.7)) { shownValue = stats.totalValue } }
+    private func animateValue() {
+        if reduceMotion { shownValue = stats.totalValue }
+        else { withAnimation(.easeOut(duration: 0.7)) { shownValue = stats.totalValue } }
+    }
 
     var body: some View {
         NavigationStack {

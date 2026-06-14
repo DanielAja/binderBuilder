@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var importing = false
     @State private var statusMessage: String?
     @State private var cloudRestored = false
+    @State private var confirmRestore = false
 
     private var cloudStatusText: String? {
         switch env.cloud.status {
@@ -82,7 +83,7 @@ struct SettingsView: View {
                 Button { Task { await env.cloud.push() } } label: {
                     Label("Back up to iCloud now", systemImage: "icloud.and.arrow.up")
                 }
-                Button { Task { if await env.cloud.restoreFromCloud() { cloudRestored = true } } } label: {
+                Button(role: .destructive) { confirmRestore = true } label: {
                     Label("Restore from iCloud", systemImage: "icloud.and.arrow.down")
                 }
                 if let line = cloudStatusText {
@@ -94,6 +95,14 @@ struct SettingsView: View {
                 Text("Backs up your whole collection to your private iCloud. Restore replaces local data — relaunch to load it.")
             }
             .onChange(of: settings.icloudSyncEnabled) { _, on in if on { Task { await env.cloud.push() } } }
+            .confirmationDialog("Restore from iCloud?", isPresented: $confirmRestore, titleVisibility: .visible) {
+                Button("Replace local data", role: .destructive) {
+                    Task { if await env.cloud.restoreFromCloud() { cloudRestored = true } }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This replaces everything on this device with your iCloud backup. This can't be undone.")
+            }
             .alert("Restored from iCloud", isPresented: $cloudRestored) {
                 Button("OK", role: .cancel) {}
             } message: { Text("Relaunch the app to load your synced collection.") }
