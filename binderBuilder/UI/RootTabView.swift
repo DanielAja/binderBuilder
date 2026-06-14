@@ -57,5 +57,6 @@ struct RootTabView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(RootTab.settings)
         }
+        .minimizingTabBar()
     }
 }

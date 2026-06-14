@@ -156,9 +156,11 @@ struct BinderSceneView: View {
             Label("Shelf", systemImage: "books.vertical.fill")
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 14).padding(.vertical, 9)
-                .background(.ultraThinMaterial, in: Capsule())
+                .floatingGlass()
         }
         .tint(.white)
+        .accessibilityLabel("View shelf")
+        .accessibilityHint("Shows your binders and display case")
     }
 
     @ViewBuilder
@@ -173,9 +175,10 @@ struct BinderSceneView: View {
                       systemImage: owned ? "checkmark.seal.fill" : "circle.dashed")
                     .font(.headline)
                     .padding(.horizontal, 18).padding(.vertical, 12)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .floatingGlass()
             }
             .tint(owned ? .green : .secondary)
+            .accessibilityHint("Toggles whether this card is in your collection")
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }

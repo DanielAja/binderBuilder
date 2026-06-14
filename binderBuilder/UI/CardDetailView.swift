@@ -95,9 +95,14 @@ struct CardDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { _ = env.wishlist.toggle(ref) } label: {
+                Button {
+                    let nowWished = env.wishlist.toggle(ref)
+                    Haptics.selection()
+                    showToast(nowWished ? "Added to wishlist" : "Removed from wishlist")
+                } label: {
                     Image(systemName: wished ? "heart.fill" : "heart").foregroundStyle(.pink)
                 }
+                .accessibilityLabel(wished ? "Remove from wishlist" : "Add to wishlist")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -145,8 +150,9 @@ struct CardDetailView: View {
         .overlay(alignment: .bottom) {
             if let toast { Text(toast).font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 16).padding(.vertical, 10)
-                .background(.ultraThinMaterial, in: Capsule()).padding(.bottom, 24)
+                .floatingGlass().padding(.bottom, 24)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+                .accessibilityAddTraits(.isStaticText)
             }
         }
         .sheet(isPresented: $addingCopy) { CopyEditorView(ref: ref, env: env) }

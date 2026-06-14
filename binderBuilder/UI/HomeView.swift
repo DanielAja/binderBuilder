@@ -14,6 +14,7 @@ struct HomeView: View {
     @Binding var selectedTab: RootTab
     @State private var showingScan = false
     @State private var shownValue = 0.0
+    @ScaledMetric(relativeTo: .largeTitle) private var valueFontSize: CGFloat = 40
 
     private var stats: CollectionStatsStore { env.stats }
 
@@ -48,8 +49,10 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Collection Value").font(.subheadline).foregroundStyle(.secondary)
             Text(shownValue, format: .currency(code: "USD"))
-                .font(.system(size: 40, weight: .bold, design: .rounded))
+                .font(.system(size: valueFontSize, weight: .bold, design: .rounded))
                 .contentTransition(.numericText(value: shownValue))
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
             HStack(spacing: 12) {
                 Text("Raw \(stats.rawValue.formatted(.currency(code: "USD")))")
                     .font(.caption).foregroundStyle(.secondary)

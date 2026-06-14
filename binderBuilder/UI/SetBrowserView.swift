@@ -124,6 +124,8 @@ struct SetCardsView: View {
     @State private var filter: OwnFilter = .all
     @State private var quickAdd = false
     @State private var celebrate = false
+    @ScaledMetric(relativeTo: .largeTitle) private var sealSize: CGFloat = 56
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum OwnFilter: String, CaseIterable { case all = "All", owned = "Owned", missing = "Missing" }
 
@@ -177,9 +179,10 @@ struct SetCardsView: View {
         .overlay {
             if celebrate {
                 ZStack {
-                    ConfettiView()
+                    if !reduceMotion { ConfettiView() }
                     VStack(spacing: 8) {
-                        Image(systemName: "checkmark.seal.fill").font(.system(size: 56)).foregroundStyle(.green)
+                        Image(systemName: "checkmark.seal.fill").font(.system(size: sealSize)).foregroundStyle(.green)
+                            .accessibilityHidden(true)
                         Text("Set Complete! 🎉").font(.title2.bold())
                         Text(set.name).foregroundStyle(.secondary)
                     }
