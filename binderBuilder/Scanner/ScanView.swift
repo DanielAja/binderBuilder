@@ -85,7 +85,10 @@ struct ScanView: View {
         busy = true
         defer { busy = false }
         guard let data = try? await item.loadTransferable(type: Data.self),
-              let image = UIImage(data: data)?.normalizedCGImage() else { return }
+              let image = UIImage(data: data)?.normalizedCGImage() else {
+            env.errors.show("Couldn't read that photo. Try a different image.")
+            return
+        }
         results = BinderScanPipeline.scan(page: image, matcher: matcher)
         await resolveNames()
     }

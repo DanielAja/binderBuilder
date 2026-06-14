@@ -156,7 +156,6 @@ final class CompositeHitTester: HitTesting {
             + " fallback(\(fallback.debugLabel))="
             + (f.map { $0.kind.rawValue } ?? "miss")
         log.info("\(summary, privacy: .public)")
-        print("[BinderBuilder] \(summary)")
         return summary
     }
 }

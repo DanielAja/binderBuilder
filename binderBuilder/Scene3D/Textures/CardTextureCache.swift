@@ -86,7 +86,12 @@ final class CardTextureCache {
     var residentCount: Int { lru.count }
 
     private static func makePlaceholder() -> TextureResource {
-        (try? TextureResource(image: PlaceholderArt.cardBack, options: .init(semantic: .color)))
-            ?? (try! TextureResource(image: PlaceholderArt.loading, options: .init(semantic: .color)))
+        guard let texture =
+            (try? TextureResource(image: PlaceholderArt.cardBack, options: .init(semantic: .color)))
+            ?? (try? TextureResource(image: PlaceholderArt.loading, options: .init(semantic: .color)))
+        else {
+            fatalError("Unable to create any placeholder card texture")
+        }
+        return texture
     }
 }

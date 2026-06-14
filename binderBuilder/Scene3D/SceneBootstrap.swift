@@ -323,20 +323,20 @@ enum SceneBootstrap {
     }
 
     private static func fallbackTexture() -> TextureResource {
-        // 1x1 white pixel; only hit if CoreGraphics fails, which it does not.
-        try! TextureResource(
-            image: {
-                let ctx = CGContext(
-                    data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
-                    space: CGColorSpaceCreateDeviceRGB(),
-                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-                )!
-                ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-                ctx.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
-                return ctx.makeImage()!
-            }(),
-            options: .init(semantic: .color)
-        )
+        // 1x1 white pixel; only hit if CoreGraphics fails (effectively never).
+        guard let ctx = CGContext(
+                data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            fatalError("CoreGraphics could not allocate a 1x1 context for the fallback texture")
+        }
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        guard let image = ctx.makeImage(),
+              let texture = try? TextureResource(image: image, options: .init(semantic: .color)) else {
+            fatalError("Could not create the fallback texture from a 1x1 image")
+        }
+        return texture
     }
 }
 

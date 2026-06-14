@@ -28,8 +28,13 @@ final class AppEnvironment {
     let alerts: AlertStore
     let stats: CollectionStatsStore
     let cloud: CloudSyncService
+    let errors: ErrorPresenter
     let imageCache: ImageCache
     let textureCache: CardTextureCache
+
+    /// A problem detected during init (e.g. the on-disk DB couldn't open and we
+    /// fell back to a temporary store), surfaced once the UI is up.
+    @ObservationIgnored private var launchWarning: String?
 
     /// The binder currently rendered in 3D and its prepared card content.
     private(set) var openBinderID: String?
@@ -49,8 +54,26 @@ final class AppEnvironment {
         let catalogDB = GRDBCatalogDatabase.bundled()
         catalog = catalogDB
         search = CatalogStore(catalog: catalogDB)
-        let database = (try? UserDatabase.openDefault()) ?? (try! UserDatabase.inMemory())
+        // Open the on-disk store; if it's missing/corrupt, fall back to a
+        // temporary in-memory store so the app still launches (and tell the
+        // user their changes won't be saved) instead of crashing.
+        let database: UserDatabase
+        var warning: String?
+        do {
+            database = try UserDatabase.openDefault()
+        } catch {
+            Self.log.fault("openDefault failed: \(String(describing: error), privacy: .public)")
+            do {
+                database = try UserDatabase.inMemory()
+                warning = "Couldn't open your saved collection, so it's running in temporary mode — changes won't be saved. Reinstalling may fix this."
+            } catch {
+                Self.log.fault("inMemory fallback failed: \(String(describing: error), privacy: .public)")
+                fatalError("Unable to initialize the database: \(error)")
+            }
+        }
         userDatabase = database
+        launchWarning = warning
+        errors = ErrorPresenter()
         settings = SettingsStore()
         let collection = CollectionStore(database: database)
         self.collection = collection
@@ -96,6 +119,7 @@ final class AppEnvironment {
             userDatabase.addKnownSets(sets.map(\.id))
         }
         isReady = true
+        if let launchWarning { errors.show(launchWarning) }
     }
 
     /// Runs the price-drop + new-release alert checks (on app activation /

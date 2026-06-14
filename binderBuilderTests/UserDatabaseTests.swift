@@ -21,6 +21,17 @@ struct UserDatabaseTests {
                            "value_snapshot", "wishlist"])
     }
 
+    @Test func v4CreatesHotPathIndices() throws {
+        let user = try UserDatabase.inMemory()
+        let indices = try user.queue.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%' ORDER BY name
+                """)
+        }
+        #expect(indices.contains("idx_slot_binder_page_side"))
+        #expect(indices.contains("idx_group_member_group"))
+    }
+
     @Test func foreignKeysAreEnforced() throws {
         let user = try UserDatabase.inMemory()
         // Inserting a slot_assignment for a nonexistent binder must fail.

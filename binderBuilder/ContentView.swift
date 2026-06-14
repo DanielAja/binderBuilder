@@ -30,6 +30,8 @@ struct ContentView: View {
                 .task { await env.prepare() }
             }
         }
+        .overlay(alignment: .top) { errorBanner }
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: env.errors.banner)
         .onChange(of: scenePhase) { _, phase in
             guard env.isReady else { return }
             if phase == .active { Task { await env.runAlertChecks() } }
@@ -41,6 +43,26 @@ struct ContentView: View {
                 await NotificationService.requestAuthorization()
                 NotificationService.fire(title: "Binder Builder", body: "Price alerts are working ✅")
             }
+        }
+    }
+
+    @ViewBuilder private var errorBanner: some View {
+        if let banner = env.errors.banner {
+            Text(banner.message)
+                .font(.subheadline)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(banner.isError ? Color.red : Color.accentColor,
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .shadow(radius: 8, y: 2)
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .onTapGesture { env.errors.dismiss() }
+                .accessibilityAddTraits(.isStaticText)
+                .accessibilityHint("Double-tap to dismiss")
         }
     }
 }
