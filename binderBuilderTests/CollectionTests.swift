@@ -62,7 +62,7 @@ import Testing
         #expect(try copyRowCount(user) == 0)
     }
 
-    @Test func stateReloadsFromTheDatabase() throws {
+    @Test func stateReloadsFromTheDatabase() async throws {
         let user = try UserDatabase.inMemory()
         let ref = CardRef(cardID: "swsh9-TG12", variant: .holo)
         do {
@@ -70,6 +70,7 @@ import Testing
             store.setOwned(ref, quantity: 2)
         }
         let reloaded = CollectionStore(database: user)
+        await reloaded.load()
         #expect(reloaded.isOwned(ref) == true)
         #expect(reloaded.quantity(of: ref) == 2)
         #expect(reloaded.ownedCount == 1)

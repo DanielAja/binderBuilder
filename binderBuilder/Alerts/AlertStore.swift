@@ -36,15 +36,21 @@ nonisolated struct PriceAlert: Identifiable, Hashable, Sendable {
 
     init(database: UserDatabase) {
         self.database = database
+    }
+
+    /// Loads the in-memory mirror off the main thread (from prepare()).
+    func load() async {
         do {
-            try database.queue.read { db in
-                for row in try Row.fetchAll(db, sql: "SELECT card_id, variant, kind, threshold, baseline FROM price_alert") {
+            let loaded = try await database.queue.read { db -> [PriceAlert] in
+                try Row.fetchAll(db, sql: "SELECT card_id, variant, kind, threshold, baseline FROM price_alert").compactMap { row -> PriceAlert? in
                     guard let variant = CardVariant(rawValue: row["variant"] as String? ?? ""),
-                          let kind = AlertKind(rawValue: row["kind"] as String? ?? "") else { continue }
+                          let kind = AlertKind(rawValue: row["kind"] as String? ?? "") else { return nil }
                     let ref = CardRef(cardID: row["card_id"], variant: variant)
-                    alerts[ref] = PriceAlert(ref: ref, kind: kind, threshold: row["threshold"], baseline: row["baseline"])
+                    return PriceAlert(ref: ref, kind: kind, threshold: row["threshold"], baseline: row["baseline"])
                 }
             }
+            alerts = Dictionary(uniqueKeysWithValues: loaded.map { ($0.ref, $0) })
+            changeToken &+= 1
         } catch {
             Self.logger.error("failed to load alerts: \(String(describing: error))")
         }

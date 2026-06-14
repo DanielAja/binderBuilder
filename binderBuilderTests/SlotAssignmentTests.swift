@@ -183,7 +183,7 @@ import Testing
 
     // MARK: - Display case
 
-    @Test func displayCaseStoresThreeSlotsAndIgnoresOutOfBounds() throws {
+    @Test func displayCaseStoresThreeSlotsAndIgnoresOutOfBounds() async throws {
         let stores = try makeStores()
         let mew = CardRef(cardID: "swsh9-TG12", variant: .holo)
         let zard = CardRef(cardID: "base1-4", variant: .firstEdition)
@@ -202,12 +202,13 @@ import Testing
         #expect(stores.binders.displayCase == [nil, nil, zard])
 
         let reloaded = BinderStore(database: stores.user, catalog: nil) { _ in false }
+        await reloaded.load()
         #expect(reloaded.displayCase == [nil, nil, zard])
     }
 
     // MARK: - Binder CRUD details
 
-    @Test func createOrdersBySortOrderAndRenamePersists() throws {
+    @Test func createOrdersBySortOrderAndRenamePersists() async throws {
         let stores = try makeStores()
         let first = try #require(stores.binders.createBinder(name: "One", coverColor: "#111111"))
         let second = try #require(stores.binders.createBinder(name: "Two", coverColor: "#222222"))
@@ -216,6 +217,7 @@ import Testing
 
         stores.binders.renameBinder(first.id, to: "One Renamed")
         let reloaded = BinderStore(database: stores.user, catalog: nil) { _ in false }
+        await reloaded.load()
         #expect(reloaded.binders.map(\.name) == ["One Renamed", "Two"])
         #expect(reloaded.binders.map(\.id) == [first.id, second.id])
     }

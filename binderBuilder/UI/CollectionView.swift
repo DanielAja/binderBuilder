@@ -24,6 +24,14 @@ struct CollectionView: View {
     @State private var showNewGroup = false
     @State private var newGroupName = ""
 
+    // Derived view data, computed off the render path (on load + filter change)
+    // rather than inside `body`, so scrolling doesn't re-filter/re-sort.
+    @State private var copiesByCard: [String: [CardCopy]] = [:]
+    @State private var displayed: [CardSummary] = []
+    @State private var groupedSections: [CardSection] = []
+
+    struct CardSection: Identifiable { let title: String; let cards: [CardSummary]; var id: String { title } }
+
     enum Section: String, CaseIterable { case collection = "Cards", groups = "Groups", wishlist = "Wishlist" }
     enum Sort: String, CaseIterable { case name = "Name", value = "Value", recent = "Recent" }
     enum Kind: String, CaseIterable { case all = "All", raw = "Raw", graded = "Graded" }
@@ -59,6 +67,9 @@ struct CollectionView: View {
             }
             .task(id: env.collection.changeToken) { await load() }
             .task(id: env.wishlist.changeToken) { await loadWishlist() }
+            .onChange(of: sort) { recompute() }
+            .onChange(of: kind) { recompute() }
+            .onChange(of: groupBy) { recompute() }
         }
     }
 
@@ -85,20 +96,19 @@ struct CollectionView: View {
     // MARK: Collection
 
     @ViewBuilder private var collectionContent: some View {
-        let cards = filteredSortedOwned
-        if cards.isEmpty {
+        if displayed.isEmpty {
             ContentUnavailableView("No cards yet", systemImage: "square.stack.3d.up.slash",
                                    description: Text("Add cards from Browse or scan a page."))
         } else if groupBy == .none {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(cards) { card in NavigationLink(value: card) { tile(card) }.buttonStyle(.pressable) }
+                    ForEach(displayed) { card in NavigationLink(value: card) { tile(card) }.buttonStyle(.pressable) }
                 }.padding(12)
             }
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
-                    ForEach(sections(cards), id: \.title) { group in
+                    ForEach(groupedSections) { group in
                         SwiftUI.Section {
                             LazyVGrid(columns: columns, spacing: 12) {
                                 ForEach(group.cards) { card in NavigationLink(value: card) { tile(card) }.buttonStyle(.pressable) }
@@ -161,7 +171,8 @@ struct CollectionView: View {
     }
 
     private func tile(_ card: CardSummary) -> some View {
-        let qty = copies(card.id).count
+        let copies = copiesByCard[card.id] ?? []
+        let qty = copies.count
         return CardImageView(cardID: card.id, imageBase: card.imageBase, quality: .low, imageCache: env.imageCache)
             .overlay(alignment: .topTrailing) {
                 if qty > 1 {
@@ -170,7 +181,7 @@ struct CollectionView: View {
                 }
             }
             .overlay(alignment: .topLeading) {
-                if copies(card.id).contains(where: \.isGraded) {
+                if copies.contains(where: \.isGraded) {
                     Image(systemName: "seal.fill").foregroundStyle(.yellow).padding(5)
                 }
             }
@@ -178,16 +189,16 @@ struct CollectionView: View {
 
     // MARK: Data
 
-    private func copies(_ cardID: String) -> [CardCopy] {
-        CardVariant.allCases.flatMap { env.collection.copies(of: CardRef(cardID: cardID, variant: $0)) }
-    }
-
-    private var filteredSortedOwned: [CardSummary] {
+    /// Pure filter+sort, off the render path. Static so it's unit-testable.
+    nonisolated static func filterSort(
+        _ owned: [CardSummary], kind: Kind, sort: Sort,
+        copiesByCard: [String: [CardCopy]], valueByCard: [String: Double], recentByCard: [String: Date]
+    ) -> [CardSummary] {
         var cards = owned
         switch kind {
         case .all: break
-        case .raw: cards = cards.filter { copies($0.id).contains { !$0.isGraded } }
-        case .graded: cards = cards.filter { copies($0.id).contains(where: \.isGraded) }
+        case .raw: cards = cards.filter { (copiesByCard[$0.id] ?? []).contains { !$0.isGraded } }
+        case .graded: cards = cards.filter { (copiesByCard[$0.id] ?? []).contains(where: \.isGraded) }
         }
         switch sort {
         case .name: cards.sort { $0.name < $1.name }
@@ -197,41 +208,51 @@ struct CollectionView: View {
         return cards
     }
 
-    private func sections(_ cards: [CardSummary]) -> [(title: String, cards: [CardSummary])] {
+    nonisolated static func makeSections(
+        _ cards: [CardSummary], groupBy: GroupBy, copiesByCard: [String: [CardCopy]]
+    ) -> [CardSection] {
         let keyed: [String: [CardSummary]]
         switch groupBy {
-        case .none: return [("", cards)]
+        case .none: return [CardSection(title: "", cards: cards)]
         case .set: keyed = Dictionary(grouping: cards) { $0.setName }
         case .rarity: keyed = Dictionary(grouping: cards) { $0.rarity ?? "Unknown" }
-        case .condition: keyed = Dictionary(grouping: cards) { bestCondition($0.id)?.displayName ?? "—" }
+        case .condition: keyed = Dictionary(grouping: cards) { bestCondition(copiesByCard[$0.id] ?? [])?.displayName ?? "—" }
         }
-        return keyed.map { (title: $0.key, cards: $0.value) }.sorted { $0.title < $1.title }
+        return keyed.map { CardSection(title: $0.key, cards: $0.value) }.sorted { $0.title < $1.title }
     }
 
-    private func bestCondition(_ cardID: String) -> CardCondition? {
+    nonisolated static func bestCondition(_ copies: [CardCopy]) -> CardCondition? {
         let order: [CardCondition] = [.nm, .lp, .mp, .hp, .dmg]
-        let conditions = copies(cardID).map(\.condition)
+        let conditions = copies.map(\.condition)
         return order.first { conditions.contains($0) }
+    }
+
+    private func recompute() {
+        displayed = Self.filterSort(owned, kind: kind, sort: sort,
+                                    copiesByCard: copiesByCard, valueByCard: valueByCard, recentByCard: recentByCard)
+        groupedSections = groupBy == .none ? [] : Self.makeSections(displayed, groupBy: groupBy, copiesByCard: copiesByCard)
     }
 
     private func load() async {
         let ids = env.collection.ownedCardIDs()
         owned = (try? await env.catalog?.summaries(forCardIDs: ids)) ?? []
         market = (try? await env.catalog?.bundledMarket(for: env.collection.ownedRefs())) ?? [:]
+        // Build the card_id -> copies map once (instead of CardVariant.allCases per card per render).
+        var byCard: [String: [CardCopy]] = [:]
+        for (ref, copies) in env.collection.copiesByRef { byCard[ref.cardID, default: []].append(contentsOf: copies) }
+        copiesByCard = byCard
         var values: [String: Double] = [:], recents: [String: Date] = [:]
-        for id in ids {
+        for (id, copies) in byCard {
             var v = 0.0, newest = Date.distantPast
-            for variant in CardVariant.allCases {
-                let ref = CardRef(cardID: id, variant: variant)
-                let m = market[ref] ?? 0
-                for copy in env.collection.copies(of: ref) {
-                    v += copy.isGraded ? (copy.acquiredPrice ?? m) : m
-                    newest = max(newest, copy.acquiredAt)
-                }
+            for copy in copies {
+                let m = market[copy.ref] ?? 0
+                v += copy.isGraded ? (copy.acquiredPrice ?? m) : m
+                newest = max(newest, copy.acquiredAt)
             }
             values[id] = v; recents[id] = newest
         }
         valueByCard = values; recentByCard = recents
+        recompute()
     }
 
     private func loadWishlist() async {

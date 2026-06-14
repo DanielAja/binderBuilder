@@ -33,14 +33,42 @@ import os
     /// is immutable).
     @ObservationIgnored private var summaryCache: [String: CardSummary] = [:]
 
-    static let displayCaseSlotCount = 3
+    nonisolated static let displayCaseSlotCount = 3
 
     init(database: UserDatabase, catalog: (any CatalogReading)?, isOwned: @escaping (CardRef) -> Bool) {
         self.database = database
         self.catalog = catalog
         self.isOwned = isOwned
-        loadBinders()
-        loadDisplayCase()
+    }
+
+    /// Loads binders + display case off the main thread (from prepare()), so a
+    /// large library doesn't block the first frame.
+    func load() async {
+        struct Display: Sendable { let position: Int; let ref: CardRef }
+        do {
+            let loaded = try await database.queue.read { db -> ([Binder], [Display]) in
+                let binders = try Row.fetchAll(db, sql: """
+                    SELECT id, name, cover_color, page_count, sort_order
+                    FROM binder ORDER BY sort_order
+                    """).map { row in
+                        Binder(id: row["id"], name: row["name"], coverColor: row["cover_color"],
+                               pageCount: row["page_count"], sortOrder: row["sort_order"])
+                    }
+                let display = try Row.fetchAll(db, sql: "SELECT position, card_id, variant FROM display_case").compactMap { row -> Display? in
+                    guard let position = row["position"] as Int?,
+                          (0..<Self.displayCaseSlotCount).contains(position),
+                          let variant = CardVariant(rawValue: row["variant"] as String? ?? "") else { return nil }
+                    return Display(position: position, ref: CardRef(cardID: row["card_id"], variant: variant))
+                }
+                return (binders, display)
+            }
+            binders = loaded.0
+            var slots: [CardRef?] = Array(repeating: nil, count: Self.displayCaseSlotCount)
+            for item in loaded.1 { slots[item.position] = item.ref }
+            displayCase = slots
+        } catch {
+            Self.logger.error("BinderStore load failed: \(String(describing: error))")
+        }
     }
 
     /// First unoccupied slot in a binder (front-to-back, row-major), for
@@ -278,39 +306,4 @@ import os
 
     // MARK: - Loading
 
-    private func loadBinders() {
-        do {
-            let rows = try database.queue.read { db in
-                try Row.fetchAll(
-                    db,
-                    sql: """
-                    SELECT id, name, cover_color, page_count, sort_order
-                    FROM binder ORDER BY sort_order
-                    """)
-            }
-            binders = rows.map { row in
-                Binder(id: row["id"], name: row["name"], coverColor: row["cover_color"],
-                       pageCount: row["page_count"], sortOrder: row["sort_order"])
-            }
-        } catch {
-            Self.logger.error("loadBinders failed: \(String(describing: error))")
-        }
-    }
-
-    private func loadDisplayCase() {
-        do {
-            let rows = try database.queue.read { db in
-                try Row.fetchAll(db, sql: "SELECT position, card_id, variant FROM display_case")
-            }
-            for row in rows {
-                guard let position = row["position"] as Int?,
-                      (0..<Self.displayCaseSlotCount).contains(position),
-                      let variant = CardVariant(rawValue: row["variant"] as String? ?? "")
-                else { continue }
-                displayCase[position] = CardRef(cardID: row["card_id"], variant: variant)
-            }
-        } catch {
-            Self.logger.error("loadDisplayCase failed: \(String(describing: error))")
-        }
-    }
 }

@@ -31,14 +31,20 @@ import os
 
     init(database: UserDatabase) {
         self.database = database
+    }
+
+    /// Loads the in-memory mirror off the main thread (called from
+    /// AppEnvironment.prepare(), behind the launch screen). Keeps init cheap so
+    /// the first frame isn't blocked by a full table read.
+    func load() async {
         do {
-            let rows = try database.queue.read { db in
-                try Row.fetchAll(db, sql: Self.selectCopies)
+            let copies = try await database.queue.read { db in
+                try Row.fetchAll(db, sql: Self.selectCopies).compactMap(Self.copy(from:))
             }
-            for row in rows {
-                guard let copy = Self.copy(from: row) else { continue }
-                copiesByRef[copy.ref, default: []].append(copy)
-            }
+            var map: [CardRef: [CardCopy]] = [:]
+            for copy in copies { map[copy.ref, default: []].append(copy) }
+            copiesByRef = map
+            bump()
         } catch {
             Self.logger.error("failed to load copies: \(String(describing: error))")
         }
@@ -184,13 +190,13 @@ import os
 
     // MARK: - Row mapping
 
-    private static let selectCopies = """
+    nonisolated private static let selectCopies = """
         SELECT id, card_id, variant, condition, grade_company, grade_value,
                acquired_price, acquired_at, notes
         FROM card_copy
         """
 
-    private static func copy(from row: Row) -> CardCopy? {
+    nonisolated private static func copy(from row: Row) -> CardCopy? {
         guard let variant = CardVariant(rawValue: row["variant"] as String? ?? ""),
               let condition = CardCondition(rawValue: row["condition"] as String? ?? "NM")
         else { return nil }

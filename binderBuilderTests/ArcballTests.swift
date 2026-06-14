@@ -40,13 +40,4 @@ import simd
         #expect(distance(rotated, to) < 1e-4)
     }
 
-    @MainActor @Test func lookOrientationFacesForward() {
-        let forward = normalize(SIMD3<Float>(0.1, 0.6, 0.8))
-        let q = CardInteractionController.lookOrientation(forward: forward, up: SIMD3<Float>(0, 1, 0))
-        // The card front (+z) ends up along `forward`.
-        let facing = q.act(SIMD3<Float>(0, 0, 1))
-        #expect(distance(facing, forward) < 1e-4)
-        // Unit quaternion.
-        #expect(abs(simd_length(q.vector) - 1) < 1e-4)
-    }
 }

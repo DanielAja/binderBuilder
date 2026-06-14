@@ -135,6 +135,15 @@ nonisolated final class UserDatabase: Sendable {
                 CREATE TABLE known_set (set_id TEXT PRIMARY KEY);
                 """)
         }
+        // v4 — indices for the hot lookups (binder page contents, group membership).
+        migrator.registerMigration("v4") { db in
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_slot_binder_page_side
+                  ON slot_assignment(binder_id, page_index, side);
+                CREATE INDEX IF NOT EXISTS idx_group_member_group
+                  ON group_member(group_id);
+                """)
+        }
         return migrator
     }
 }

@@ -8,7 +8,7 @@ import Testing
 @testable import binderBuilder
 
 @MainActor struct GroupStoreTests {
-    @Test func createAddRemoveAndReload() throws {
+    @Test func createAddRemoveAndReload() async throws {
         let user = try UserDatabase.inMemory()
         let store = GroupStore(database: user)
         let holo = CardRef(cardID: "base1-4", variant: .holo)
@@ -32,6 +32,7 @@ import Testing
 
         // Reload from DB.
         let reloaded = GroupStore(database: user)
+        await reloaded.load()
         #expect(reloaded.groups.count == 2)
         #expect(reloaded.isMember(holo, of: trade.id))
         #expect(reloaded.memberCount(trade.id) == 1)
@@ -39,6 +40,8 @@ import Testing
         // Deleting a group cascades its members.
         reloaded.deleteGroup(trade.id)
         #expect(reloaded.groups.count == 1)
-        #expect(GroupStore(database: user).memberCount(trade.id) == 0)
+        let afterDelete = GroupStore(database: user)
+        await afterDelete.load()
+        #expect(afterDelete.memberCount(trade.id) == 0)
     }
 }

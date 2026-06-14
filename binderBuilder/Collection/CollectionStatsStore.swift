@@ -123,27 +123,30 @@ nonisolated struct SetProgress: Identifiable, Sendable {
         rarityCounts = facets.rarities
         typeCounts = facets.types
 
-        // Most valuable printings (resolve summaries for the top few).
-        var top: [ValuedCard] = []
-        for (ref, value) in printingValue.sorted(by: { $0.value > $1.value }).prefix(6) where value > 0 {
-            if let detail = try? await catalog?.card(id: ref.cardID) {
-                top.append(ValuedCard(card: detail.summary, value: value))
-            }
+        // Most valuable printings (one batched summary lookup, not per-card).
+        let topPairs = Array(printingValue.sorted { $0.value > $1.value }.prefix(6)).filter { $0.value > 0 }
+        let topSummaries = await summaryMap(for: topPairs.map { $0.key.cardID })
+        topValuable = topPairs.compactMap { pair in
+            topSummaries[pair.key.cardID].map { ValuedCard(card: $0, value: pair.value) }
         }
-        topValuable = top
 
-        // Recent additions.
-        var rec: [RecentCopy] = []
-        for copy in collection.allCopies().prefix(10) {
-            if let detail = try? await catalog?.card(id: copy.ref.cardID) {
-                rec.append(RecentCopy(card: detail.summary, copy: copy))
-            }
+        // Recent additions (one batched summary lookup).
+        let recentCopies = Array(collection.allCopies().prefix(10))
+        let recentSummaries = await summaryMap(for: recentCopies.map { $0.ref.cardID })
+        recent = recentCopies.compactMap { copy in
+            recentSummaries[copy.ref.cardID].map { RecentCopy(card: $0, copy: copy) }
         }
-        recent = rec
 
         // Value trend (record today, then load the series).
         try? database.recordValueSnapshot(total: totalValue, day: Self.dayString(Date()))
         trend = ((try? database.valueSnapshots(limit: 60)) ?? []).map(\.total)
+    }
+
+    /// id -> summary for a batch of card ids (deduped), in one catalog query.
+    private func summaryMap(for cardIDs: [String]) async -> [String: CardSummary] {
+        let unique = Array(Set(cardIDs))
+        let summaries = (try? await catalog?.summaries(forCardIDs: unique)) ?? []
+        return Dictionary(summaries.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     }
 
     static func dayString(_ date: Date) -> String {

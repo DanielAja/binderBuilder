@@ -23,14 +23,19 @@ import os
 
     init(database: UserDatabase) {
         self.database = database
+    }
+
+    /// Loads the in-memory mirror off the main thread (from prepare()).
+    func load() async {
         do {
-            let rows = try database.queue.read { db in
-                try Row.fetchAll(db, sql: "SELECT card_id, variant FROM wishlist")
+            let refs = try await database.queue.read { db -> [CardRef] in
+                try Row.fetchAll(db, sql: "SELECT card_id, variant FROM wishlist").compactMap { row in
+                    guard let variant = CardVariant(rawValue: row["variant"] as String? ?? "") else { return nil }
+                    return CardRef(cardID: row["card_id"], variant: variant)
+                }
             }
-            for row in rows {
-                guard let variant = CardVariant(rawValue: row["variant"] as String? ?? "") else { continue }
-                wished.insert(CardRef(cardID: row["card_id"], variant: variant))
-            }
+            wished = Set(refs)
+            changeToken &+= 1
         } catch {
             Self.logger.error("failed to load wishlist: \(String(describing: error))")
         }

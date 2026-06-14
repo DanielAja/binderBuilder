@@ -14,21 +14,26 @@ struct SetBrowserView: View {
     let env: AppEnvironment
     @State private var sets: [SetInfo] = []
     @State private var sort: SetSort = .release
+    @State private var loading = false
+    // Derived rows, computed on load / sort change (not in `body`).
+    @State private var flatRows: [SetInfo] = []
+    @State private var genSections: [GenSection] = []
 
     enum SetSort: String, CaseIterable {
         case release = "Newest", generation = "Generation", name = "A–Z"
     }
 
+    struct GenSection: Identifiable { let series: String; let sets: [SetInfo]; var id: String { series } }
+
     /// Sets grouped by generation/series, series ordered by earliest release,
-    /// sets within a series ordered newest-first.
-    private var generations: [(series: String, sets: [SetInfo])] {
-        let groups = Dictionary(grouping: sets) { $0.seriesName ?? "Other" }
-        return groups
-            .map { (series: $0.key, sets: $0.value.sorted { ($0.releaseDate ?? "") > ($1.releaseDate ?? "") }) }
+    /// sets within a series newest-first. Static + pure for unit tests.
+    nonisolated static func generationSections(_ sets: [SetInfo]) -> [GenSection] {
+        Dictionary(grouping: sets) { $0.seriesName ?? "Other" }
+            .map { GenSection(series: $0.key, sets: $0.value.sorted { ($0.releaseDate ?? "") > ($1.releaseDate ?? "") }) }
             .sorted { ($0.sets.last?.releaseDate ?? "") < ($1.sets.last?.releaseDate ?? "") }
     }
 
-    private var flatSorted: [SetInfo] {
+    nonisolated static func flatSorted(_ sets: [SetInfo], sort: SetSort) -> [SetInfo] {
         switch sort {
         case .release: return sets.sorted { ($0.releaseDate ?? "") > ($1.releaseDate ?? "") }
         case .name: return sets.sorted { $0.name < $1.name }
@@ -36,10 +41,15 @@ struct SetBrowserView: View {
         }
     }
 
+    private func recompute() {
+        flatRows = Self.flatSorted(sets, sort: sort)
+        genSections = sort == .generation ? Self.generationSections(sets) : []
+    }
+
     var body: some View {
         List {
             if sort == .generation {
-                ForEach(generations, id: \.series) { group in
+                ForEach(genSections) { group in
                     Section(group.series) {
                         ForEach(group.sets) { set in
                             NavigationLink(value: set) { setRow(set) }
@@ -47,12 +57,15 @@ struct SetBrowserView: View {
                     }
                 }
             } else {
-                ForEach(flatSorted) { set in
+                ForEach(flatRows) { set in
                     NavigationLink(value: set) { setRow(set) }
                 }
             }
         }
         .listStyle(.plain)
+        .overlay {
+            if loading && sets.isEmpty { ProgressView() }
+        }
         .navigationTitle("Sets")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -61,14 +74,21 @@ struct SetBrowserView: View {
                         ForEach(SetSort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
                 } label: { Image(systemName: "arrow.up.arrow.down.circle") }
+                .accessibilityLabel("Sort sets")
             }
         }
         .navigationDestination(for: SetInfo.self) { SetCardsView(set: $0, env: env) }
         .navigationDestination(for: CardSummary.self) { CardDetailView(card: $0, env: env) }
         .task {
-            if sets.isEmpty { sets = (try? await env.catalog?.allSets()) ?? [] }
+            if sets.isEmpty {
+                loading = true
+                sets = (try? await env.catalog?.allSets()) ?? []
+                loading = false
+            }
+            recompute()
             await env.stats.refreshIfNeeded()
         }
+        .onChange(of: sort) { recompute() }
     }
 
     private func setRow(_ set: SetInfo) -> some View {

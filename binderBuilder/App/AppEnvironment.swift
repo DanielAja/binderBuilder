@@ -69,6 +69,16 @@ final class AppEnvironment {
     /// Seeds first-run content, picks the binder to open, and snapshots its
     /// card content for the scene. Idempotent enough to call once at launch.
     func prepare() async {
+        // Load every store's in-memory mirror off the main thread, concurrently,
+        // behind ContentView's launch screen — so init stays cheap and a large
+        // collection/library never blocks the first frame.
+        async let c: Void = collection.load()
+        async let w: Void = wishlist.load()
+        async let g: Void = groups.load()
+        async let b: Void = binders.load()
+        async let a: Void = alerts.load()
+        _ = await (c, w, g, b, a)
+
         await DemoSeed.seedIfNeeded(
             settings: settings, catalog: catalog, collection: collection, binders: binders
         )

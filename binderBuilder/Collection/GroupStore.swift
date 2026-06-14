@@ -34,16 +34,26 @@ nonisolated struct CardGroup: Identifiable, Hashable, Sendable {
 
     init(database: UserDatabase) {
         self.database = database
+    }
+
+    /// Loads groups + membership off the main thread (from prepare()).
+    func load() async {
+        struct Member: Sendable { let groupID: String; let ref: CardRef }
         do {
-            try database.queue.read { db in
-                for row in try Row.fetchAll(db, sql: "SELECT id, name, color, sort_order FROM card_group ORDER BY sort_order") {
-                    groups.append(CardGroup(id: row["id"], name: row["name"], color: row["color"], sortOrder: row["sort_order"]))
+            let loaded = try await database.queue.read { db -> ([CardGroup], [Member]) in
+                let groups = try Row.fetchAll(db, sql: "SELECT id, name, color, sort_order FROM card_group ORDER BY sort_order")
+                    .map { CardGroup(id: $0["id"], name: $0["name"], color: $0["color"], sortOrder: $0["sort_order"]) }
+                let members = try Row.fetchAll(db, sql: "SELECT group_id, card_id, variant FROM group_member").compactMap { row -> Member? in
+                    guard let variant = CardVariant(rawValue: row["variant"] as String? ?? "") else { return nil }
+                    return Member(groupID: row["group_id"], ref: CardRef(cardID: row["card_id"], variant: variant))
                 }
-                for row in try Row.fetchAll(db, sql: "SELECT group_id, card_id, variant FROM group_member") {
-                    guard let variant = CardVariant(rawValue: row["variant"] as String? ?? "") else { continue }
-                    membersByGroup[row["group_id"], default: []].insert(CardRef(cardID: row["card_id"], variant: variant))
-                }
+                return (groups, members)
             }
+            groups = loaded.0
+            var map: [String: Set<CardRef>] = [:]
+            for member in loaded.1 { map[member.groupID, default: []].insert(member.ref) }
+            membersByGroup = map
+            bump()
         } catch {
             Self.logger.error("failed to load groups: \(String(describing: error))")
         }

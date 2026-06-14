@@ -11,7 +11,7 @@ import Testing
 @testable import binderBuilder
 
 @MainActor struct WishlistStoreTests {
-    @Test func toggleSetAndReload() throws {
+    @Test func toggleSetAndReload() async throws {
         let user = try UserDatabase.inMemory()
         let store = WishlistStore(database: user)
         let holo = CardRef(cardID: "base1-4", variant: .holo)
@@ -32,6 +32,7 @@ import Testing
 
         // Reloads from the database.
         let reloaded = WishlistStore(database: user)
+        await reloaded.load()
         #expect(reloaded.isWished(reverse) == true)
         #expect(reloaded.count == 1)
     }
