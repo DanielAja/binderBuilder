@@ -37,6 +37,7 @@ struct AlertChecker {
     func runAll() async {
         await checkPrices()
         await checkNewReleases()
+        await reconcileDrops()
     }
 
     func checkPrices() async {
@@ -67,6 +68,14 @@ struct AlertChecker {
             title: "New set released",
             body: new.count == 1 ? "A new set just dropped!" : "\(new.count) new sets just dropped!",
             id: "release-\(new.sorted().joined(separator: "-").hashValue)")
+    }
+
+    /// Rebuilds the pending release-date reminders. Runs after
+    /// `checkNewReleases()` so known_set already carries this pass's TCGdex
+    /// ids — the signal that confirms (and retires) a curated release.
+    func reconcileDrops() async {
+        guard env.settings.dropAlertsEnabled else { return }
+        await DropScheduler.reconcile(env: env)
     }
 
     // MARK: Helpers
