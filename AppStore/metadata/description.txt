@@ -1,0 +1,34 @@
+Most collection apps hand you a spreadsheet. This one hands you a binder.
+
+Open Binder Builder and there's a real binder sitting on the desk in front of you. Pages turn under your finger and settle with weight. Tilt your device and the holo cards catch the light and shift, the way foil actually does. Pull a card off the page to hold it up close, spin it, look at the back. It's your collection on a shelf instead of in a list.
+
+Behind that binder is a complete, unofficial fan-made tracker for Pokémon TCG collectors — built by a collector, given away free.
+
+TRACK
+Search or browse every set, card by card. Log each copy separately with its own condition and grade, so four copies of the same card can each be what they really are. Watch set completion fill in as you go. Build a wishlist with target prices. Organize anything into custom groups, and see collection stats and a value trend over time.
+
+SCAN
+Point the camera at a card and it's recognized on device in about a second, with its price right there — keep going and clear a stack fast. Or photograph a whole binder page and add up to nine cards at once. Recognition happens entirely on your iPhone or iPad; camera frames are never uploaded.
+
+PRICES
+Live market data from TCGdex, including TCGplayer market price and Cardmarket trend. Optionally link out to eBay sold listings for a real-world sanity check, or add your own eBay API keys for sold-price lookups from inside the app.
+
+TRADE
+Log a trade card by card and watch the fairness meter balance as you add to each side, so you know where a deal stands before you shake on it. Keep a running profit-and-loss history of everything you've traded.
+
+ALERTS
+Get notified when a card on your wishlist drops below your target, or when a new set drops. Alerts are generated on device — no server, no account, no cost.
+
+BACKUP
+Export your whole collection to a readable JSON file any time, and import it back. Optionally turn on iCloud sync to keep devices in step through your own private iCloud database. Your data is yours; it never passes through anyone else's server.
+
+FREE, AND ACTUALLY FREE
+No account. No sign-up. No ads. No subscription. No paywalled features waiting behind a trial. No analytics, no tracking, no data collection of any kind. Everything described above is in the app the moment you install it.
+
+iPhone and iPad, iOS 18 and later.
+
+Card data and images from TCGdex (tcgdex.dev).
+
+Prices shown are estimates aggregated from third-party marketplace data. They are not offers to buy or sell, they may be delayed or inaccurate, and they should not be relied on as appraisals.
+
+Binder Builder is an unofficial fan app. Pokémon and Pokémon character names are trademarks of Nintendo, Creatures Inc., and GAME FREAK inc. This app is not affiliated with, endorsed, sponsored, or approved by them.

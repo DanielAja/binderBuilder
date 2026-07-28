@@ -1,0 +1,21 @@
+Version 1.0 — hello, and thanks for installing.
+
+This started with a small annoyance: looking through my own collection felt like doing paperwork. So the first thing I built wasn't a database screen, it was a binder — one that sits on a desk, turns pages under your finger, and catches the light on the holos when you tilt your phone. Pull a card off the page and you can spin it around and look at the back, same as you would at a table.
+
+Everything else is here from day one, not saved up for a "pro" tier later:
+
+• Search and browse every set, with per-copy condition and grade
+• Set completion tracking, custom groups, and a wishlist with target prices
+• Collection stats and value over time
+• Fast camera scanner with live prices, recognized on device
+• Binder-page photo scanning — nine cards at once
+• Live market prices, plus optional eBay sold-listing lookups
+• Trade logging with a fairness meter and running profit/loss
+• Price-drop and new-release alerts, generated on your device
+• JSON backup and optional private iCloud sync
+
+No account, no ads, no subscription, and nothing about you is collected.
+
+If something's broken, slow, or missing — or if a card scans wrong — please email me at sand_paints0g@icloud.com. It's a one-person project and I read every message.
+
+Enjoy the binder.
