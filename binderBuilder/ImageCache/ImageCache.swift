@@ -34,6 +34,17 @@ nonisolated enum ImageCacheError: Error, Equatable {
     case unavailable
 }
 
+/// A rough memory tier for cache-ceiling defaults. Devices with ~4GB or
+/// less physical RAM (iPhone SE 2nd/3rd gen, iPhone XR, base iPads) run
+/// tight on memory once RealityKit's own footprint sits on top of the
+/// image caches, so those default to smaller ceilings. Every call site
+/// that consults this can still be overridden directly (init params), so
+/// tests never depend on the host machine's actual RAM.
+nonisolated enum DeviceMemoryTier {
+    static let isConstrained: Bool =
+        ProcessInfo.processInfo.physicalMemory <= 4 * 1_024 * 1_024 * 1_024
+}
+
 actor ImageCache {
     private let session: URLSession
     private let pinnedRoot: URL
@@ -58,17 +69,23 @@ actor ImageCache {
         pinnedRoot: URL,
         cachesRoot: URL,
         retryDelays: [Duration] = [.milliseconds(500), .seconds(2)],
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        memoryCostLimit: Int = ImageCache.defaultMemoryCostLimit
     ) {
         self.session = session
         self.pinnedRoot = pinnedRoot
         self.cachesRoot = cachesRoot
         self.retryDelays = retryDelays
         self.now = now
-        memory.totalCostLimit = 64 * 1024 * 1024  // ~64 MB of decoded pixels
+        memory.totalCostLimit = memoryCostLimit
         try? FileManager.default.createDirectory(at: pinnedRoot, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: cachesRoot, withIntermediateDirectories: true)
     }
+
+    /// ~64 MB of decoded pixels normally; halved on memory-constrained
+    /// devices (see `DeviceMemoryTier`). Overridable via `init` for tests.
+    static let defaultMemoryCostLimit: Int =
+        DeviceMemoryTier.isConstrained ? 32 * 1024 * 1024 : 64 * 1024 * 1024
 
     /// The production cache: Application Support/CardImages (backup-excluded)
     /// for pinned images, Caches/CardImages for transient ones.
@@ -140,11 +157,24 @@ actor ImageCache {
 
     /// Kicks off background fetches for a batch of cards (current + adjacent
     /// spreads). Fire-and-forget: failures are swallowed (and negative-cached).
+    /// Runs at most `maxConcurrentPrefetches` fetch+decodes at a time so a
+    /// large set (hundreds of cards) doesn't spawn one Task per card; if this
+    /// generation is superseded by a newer `prefetch` call, the in-flight
+    /// batch is simply left to drain (results just repopulate the caches).
     func prefetch(_ cards: [CardSummary], quality: ImageQuality, pinned: Bool) {
-        for card in cards {
-            Task {
-                _ = try? await self.image(
-                    for: card.id, imageBase: card.imageBase, quality: quality, pinned: pinned)
+        let maxConcurrentPrefetches = 6
+        Task {
+            await withTaskGroup(of: Void.self) { group in
+                var remaining = cards[...]
+                func addNext() {
+                    guard let card = remaining.popFirst() else { return }
+                    group.addTask {
+                        _ = try? await self.image(
+                            for: card.id, imageBase: card.imageBase, quality: quality, pinned: pinned)
+                    }
+                }
+                for _ in 0..<min(maxConcurrentPrefetches, remaining.count) { addNext() }
+                while await group.next() != nil { addNext() }
             }
         }
     }
@@ -218,7 +248,7 @@ actor ImageCache {
                 guard (200..<300).contains(http.statusCode) else {
                     throw URLError(.badServerResponse)
                 }
-                guard let image = Self.decode(data) else {
+                guard let image = Self.decode(data, quality: quality) else {
                     throw URLError(.cannotDecodeContentData)
                 }
                 write(data: data, cardID: cardID, quality: quality, pinned: pinned)
@@ -259,7 +289,7 @@ actor ImageCache {
         }
         guard let location,
               let data = try? Data(contentsOf: location),
-              let image = Self.decode(data)
+              let image = Self.decode(data, quality: quality)
         else { return nil }
         return image
     }
@@ -314,11 +344,31 @@ actor ImageCache {
         return URL(string: "\(trimmed)/\(quality.rawValue).webp")
     }
 
-    /// Image I/O decodes WebP natively on iOS 14+.
-    static func decode(_ data: Data) -> CGImage? {
-        let options = [kCGImageSourceShouldCache: false] as CFDictionary
-        guard let source = CGImageSourceCreateWithData(data as CFData, options) else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, options)
+    /// Image I/O decodes WebP natively on iOS 14+. `.low`-quality images —
+    /// used almost everywhere as grid/list thumbnails (34-120pt frames) —
+    /// decode through the CGImageSource thumbnail path, bounded at
+    /// `lowQualityMaxPixelSize`: comfortably above the native 245x337 low
+    /// asset's longest side, so nothing is visibly softened, but the
+    /// thumbnail path decodes+caches immediately instead of leaving a full
+    /// decode buffer to be recreated on every draw. `.high` images always
+    /// decode at full size: CardTextureCache needs the true 600x825 texture
+    /// for the binder's 3D card surfaces, and the card detail view shows
+    /// `.high` art at near-native size.
+    private static let lowQualityMaxPixelSize = 400
+
+    static func decode(_ data: Data, quality: ImageQuality) -> CGImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else { return nil }
+
+        guard quality == .low else {
+            return CGImageSourceCreateImageAtIndex(source, 0, sourceOptions)
+        }
+        let thumbnailOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: lowQualityMaxPixelSize,
+            kCGImageSourceShouldCacheImmediately: true,
+        ] as CFDictionary
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions)
     }
 
     private static func cost(of image: CGImage) -> Int {

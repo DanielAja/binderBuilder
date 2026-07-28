@@ -5,8 +5,9 @@
 //  Bridges the ImageCache (CGImage source of truth, shared with the 2D UI) to
 //  RealityKit TextureResources for the 3D card surfaces. An LRU keyed by
 //  CardRef keeps at most `capacity` GPU textures resident (~2.6 MB each at
-//  600x825 BGRA8 + mips, so ~125 MB at 48). In-flight loads are deduplicated
-//  so the same card requested by several pockets/spreads only decodes once.
+//  600x825 BGRA8 + mips, so ~125 MB at the default capacity of 48, halved to
+//  24 on memory-constrained devices). In-flight loads are deduplicated so the
+//  same card requested by several pockets/spreads only decodes once.
 //
 //  Synchronous `cached(_:)` returns an already-resident texture (or nil) so
 //  the placement coordinator can pose a card immediately; `load(_:imageBase:)`
@@ -34,11 +35,16 @@ final class CardTextureCache {
     /// Shared placeholder shown while art loads or when a card has no image.
     private(set) lazy var placeholder: TextureResource = Self.makePlaceholder()
 
-    init(imageCache: ImageCache, quality: ImageQuality = .high, capacity: Int = 48) {
+    init(imageCache: ImageCache, quality: ImageQuality = .high, capacity: Int = CardTextureCache.defaultCapacity) {
         self.imageCache = imageCache
         self.quality = quality
         self.capacity = capacity
     }
+
+    /// 48 resident textures (~125 MB at 600x825) normally; halved on
+    /// memory-constrained devices (see `DeviceMemoryTier`) to reduce jetsam
+    /// risk once RealityKit's own footprint is added. Overridable via `init`.
+    nonisolated static var defaultCapacity: Int { DeviceMemoryTier.isConstrained ? 24 : 48 }
 
     /// A resident texture for `ref`, or nil if it hasn't been loaded yet.
     /// Marks it most-recently-used.

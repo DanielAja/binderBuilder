@@ -267,8 +267,26 @@ private struct CacheHarness {
 
         // Round-trip: the bytes on disk decode too.
         let onDisk = ImageCache.fileURL(root: harness.cachesRoot, quality: .low, cardID: token)
-        let decoded = ImageCache.decode(try Data(contentsOf: onDisk))
+        let decoded = ImageCache.decode(try Data(contentsOf: onDisk), quality: .low)
         #expect(decoded?.width == 245)
+    }
+
+    @Test func lowQualityDecodeIsBoundedToThumbnailCeiling() throws {
+        // Source well above the low tier's native 245x337 dimensions, to
+        // prove the decode path actually bounds the output pixel size.
+        let oversized = makeGradientPNG(width: 1200, height: 1650)
+
+        let low = try #require(ImageCache.decode(oversized, quality: .low))
+        #expect(max(low.width, low.height) <= 400)
+        // Aspect ratio preserved.
+        let sourceRatio = 1200.0 / 1650.0
+        let lowRatio = Double(low.width) / Double(low.height)
+        #expect(abs(lowRatio - sourceRatio) < 0.01)
+
+        // `.high` never downsamples: CardTextureCache needs the true pixels.
+        let high = try #require(ImageCache.decode(oversized, quality: .high))
+        #expect(high.width == 1200)
+        #expect(high.height == 1650)
     }
 
     @Test func transientFailuresRetryThenNegativeCacheFiveMinutes() async throws {
