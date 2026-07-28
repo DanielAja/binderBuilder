@@ -27,6 +27,10 @@ struct RootTabView: View {
             _tab = State(initialValue: .collection)
         } else if DebugLaunchState.launchFlag("-showSettings") {
             _tab = State(initialValue: .settings)
+        } else if DebugLaunchState.launchFlag("-showCardDetail") || DebugLaunchState.launchFlag("-showScan") {
+            // Both flags are handled inside BinderSceneView.onAppear, which
+            // never mounts unless the Binder tab is the initial selection.
+            _tab = State(initialValue: .binder)
         } else {
             switch DebugLaunchState.current.uiState {
             case .binderOpen, .cardFloating, .shelf: _tab = State(initialValue: .binder)

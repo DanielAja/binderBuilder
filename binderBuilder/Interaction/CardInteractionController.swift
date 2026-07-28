@@ -29,11 +29,18 @@ final class CardInteractionController {
     /// Accumulated rotation (radians) since the last haptic "tick".
     private var rotationSinceTick: Float = 0
 
-    private(set) weak var floatingCard: ModelEntity?
+    private(set) weak var floatingCard: ModelEntity? {
+        didSet { onFloatingChanged?(floatingRef) }
+    }
     var isFloating: Bool { floatingCard != nil }
 
     /// CardRef of the floating card, if any (drives the owned-toggle control).
     var floatingRef: CardRef? { floatingCard?.components[CardSlotComponent.self]?.ref }
+
+    /// Single source of truth for UI mirroring the floating state: fires on
+    /// every pull (gesture or debug auto-pull) and every return, with the
+    /// newly-floating card's ref (nil once it's back in its pocket).
+    var onFloatingChanged: ((CardRef?) -> Void)?
 
     /// Updates the floating card's grayscale/foil to reflect a new owned state.
     func setFloatingOwned(_ owned: Bool) {

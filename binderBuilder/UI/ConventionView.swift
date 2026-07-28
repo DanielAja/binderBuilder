@@ -309,9 +309,12 @@ private struct ListingRow: View {
         HStack(spacing: 12) {
             CardImageView(cardID: listing.ref.cardID, imageBase: summary?.imageBase,
                           quality: .low, imageCache: env.imageCache)
+                // The summaries load after the first render; re-identify so the
+                // image view refetches instead of keeping the no-image card back.
+                .id(summary?.imageBase)
                 .frame(width: 40, height: 55)
             VStack(alignment: .leading, spacing: 2) {
-                Text(summary?.name ?? listing.ref.cardID).font(.subheadline).lineLimit(1)
+                Text(summary?.name ?? listing.ref.fallbackName).font(.subheadline).lineLimit(1)
                 Text("\(listing.condition.rawValue) · ×\(listing.quantity) · asking \(listing.value.label)")
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -336,9 +339,10 @@ private struct WantRow: View {
         HStack(spacing: 12) {
             CardImageView(cardID: ref.cardID, imageBase: summary?.imageBase,
                           quality: .low, imageCache: env.imageCache)
+                .id(summary?.imageBase)
                 .frame(width: 40, height: 55)
             VStack(alignment: .leading, spacing: 2) {
-                Text(summary?.name ?? ref.cardID).font(.subheadline).lineLimit(1)
+                Text(summary?.name ?? ref.fallbackName).font(.subheadline).lineLimit(1)
                 HStack(spacing: 4) {
                     if priority > 0 {
                         ForEach(0..<min(priority, 3), id: \.self) { _ in
@@ -446,8 +450,9 @@ private struct WantTargetEditorView: View {
                     HStack {
                         CardImageView(cardID: ref.cardID, imageBase: summary?.imageBase,
                                       quality: .low, imageCache: env.imageCache)
+                            .id(summary?.imageBase)
                             .frame(width: 44, height: 61)
-                        Text(summary?.name ?? ref.cardID).font(.headline)
+                        Text(summary?.name ?? ref.fallbackName).font(.headline)
                     }
                 }
                 Section("You'd trade for") { TradeValueEditor(value: $value, market: market) }

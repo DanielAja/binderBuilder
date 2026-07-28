@@ -33,10 +33,10 @@ struct HomeView: View {
                 VStack(spacing: 22) {
                     valueCard
                     statTiles
+                    quickActions
                     if !stats.setProgress.isEmpty { setsInProgress }
                     if !stats.topValuable.isEmpty { mostValuable }
                     if !stats.recent.isEmpty { recentlyAdded }
-                    quickActions
                 }
                 .padding()
             }

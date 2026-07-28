@@ -116,6 +116,12 @@ struct FastScanView: View {
             } label: {
                 Text(model.defaultCondition.rawValue)
                     .font(.subheadline.weight(.semibold))
+                    // The segmented picker holds the higher layout priority, so
+                    // the stack offers it everything above this label's *minimum*
+                    // width — zero for a plain Text, which on a 375 pt screen
+                    // left the chip an empty capsule. Pinning the label to its
+                    // ideal width reserves it first; the picker takes the rest.
+                    .fixedSize()
                     .padding(.horizontal, 10).padding(.vertical, 8)
                     .background(.ultraThinMaterial, in: Capsule())
             }

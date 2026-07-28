@@ -54,6 +54,10 @@ struct BinderSceneView: View {
         }
         .sheet(isPresented: $debugScan) { ScanView(env: env) }
         .onAppear {
+            // Single source of truth for the owned-toggle bar: fires on every
+            // pull/return, gesture-driven or programmatic (debug auto-pull
+            // included), so the bar never needs bespoke bookkeeping per path.
+            model.result.cardInteraction?.onFloatingChanged = { ref in floatingRef = ref }
             if DebugLaunchState.launchFlag("-showScan") { debugScan = true }
             if DebugLaunchState.launchFlag("-showCardDetail") {
                 Task {
@@ -115,7 +119,6 @@ struct BinderSceneView: View {
                                 translation: value.translation, velocity: v, viewport: proxy.size
                             )
                         }
-                        floatingRef = model.result.cardInteraction?.floatingRef
                     }
             )
             .simultaneousGesture(
@@ -130,7 +133,6 @@ struct BinderSceneView: View {
                             model.result.cardInteraction?.handleTap(at: value.location, viewport: proxy.size)
                         }
                         sceneMode = model.result.modeController?.mode ?? sceneMode
-                        floatingRef = model.result.cardInteraction?.floatingRef
                     }
             )
         }

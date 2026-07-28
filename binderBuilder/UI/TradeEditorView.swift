@@ -257,8 +257,9 @@ private struct TradeItemEditorView: View {
                     HStack {
                         CardImageView(cardID: item.ref.cardID, imageBase: summary?.imageBase,
                                       quality: .low, imageCache: env.imageCache)
+                            .id(summary?.imageBase)
                             .frame(width: 44, height: 61)
-                        Text(summary?.name ?? item.ref.cardID).font(.headline)
+                        Text(summary?.name ?? item.ref.fallbackName).font(.headline)
                     }
                 }
                 if variants.count > 1 {
@@ -319,7 +320,7 @@ extension TradeEditorView {
             items: [
                 TradeItem(ref: CardRef(cardID: "base1-4", variant: .holo),
                           direction: .incoming, condition: .lp, valueEach: 420),
-                TradeItem(ref: CardRef(cardID: "swsh9-25", variant: .holo),
+                TradeItem(ref: CardRef(cardID: "swsh9-014", variant: .holo),
                           direction: .outgoing, valueEach: 55),
                 TradeItem(ref: CardRef(cardID: "swsh9-TG12", variant: .holo),
                           direction: .outgoing, valueEach: 380),
@@ -379,6 +380,20 @@ struct FairnessMeter: View {
 
 // MARK: - Item row
 
+extension CardRef {
+    /// What to show when the catalog has no row for this card (a ref saved
+    /// before a catalog update, or a bad id): "swsh9-TG12" reads as a bug,
+    /// "SWSH9 #TG12" reads as a card.
+    nonisolated var fallbackName: String {
+        guard let dash = cardID.lastIndex(of: "-"), dash != cardID.startIndex else {
+            return cardID.uppercased()
+        }
+        let number = cardID[cardID.index(after: dash)...]
+        guard !number.isEmpty else { return cardID.uppercased() }
+        return "\(cardID[..<dash].uppercased()) #\(number)"
+    }
+}
+
 struct TradeItemRow: View {
     let item: TradeItem
     let env: AppEnvironment
@@ -388,9 +403,13 @@ struct TradeItemRow: View {
         HStack(spacing: 12) {
             CardImageView(cardID: item.ref.cardID, imageBase: summary?.imageBase,
                           quality: .low, imageCache: env.imageCache)
+                // CardImageView fetches once per card id, and the summary (with
+                // it the imageBase) only lands after the first render — without
+                // a new identity the row would keep the no-image card back.
+                .id(summary?.imageBase)
                 .frame(width: 34, height: 47)
             VStack(alignment: .leading, spacing: 1) {
-                Text(summary?.name ?? item.ref.cardID).font(.subheadline).lineLimit(1)
+                Text(summary?.name ?? item.ref.fallbackName).font(.subheadline).lineLimit(1)
                 Text("\(item.condition.rawValue) · ×\(item.quantity)\(item.ref.variant == .normal ? "" : " · \(item.ref.variant.displayName)")")
                     .font(.caption2).foregroundStyle(.secondary)
             }
