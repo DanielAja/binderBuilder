@@ -60,7 +60,11 @@ struct ScanView: View {
                     .background(.tint, in: Capsule())
                     .foregroundStyle(.white)
             }
-            if busy { ProgressView("Scanning…") }
+            .disabled(busy)
+            if busy {
+                ProgressView("Scanning…")
+                    .accessibilityLabel("Scanning the page")
+            }
         }
         .padding()
     }
@@ -89,7 +93,7 @@ struct ScanView: View {
             env.errors.show("Couldn't read that photo. Try a different image.")
             return
         }
-        results = BinderScanPipeline.scan(page: image, matcher: matcher)
+        results = await BinderScanPipeline.scan(page: image, matcher: matcher)
         await resolveNames()
     }
 

@@ -30,6 +30,11 @@ nonisolated final class CameraScanner: NSObject, AVCaptureVideoDataOutputSampleB
     private var configured = false
     private var lastEmit = Date.distantPast
 
+    /// Portrait pixel size of a delivered frame (the .hd1280x720 preset with
+    /// the connection rotated 90°). Lets the reticle lay out before the first
+    /// frame arrives; the model corrects it from the frames themselves.
+    static let frameSize = CGSize(width: 720, height: 1280)
+
     /// Minimum seconds between delivered frames (throttles the match/price work).
     var throttle: TimeInterval = 0.18
     /// Called on the main actor with each throttled frame. Isolation is part of

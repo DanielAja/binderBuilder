@@ -5,8 +5,13 @@
 //  Nearest-card lookup over the bundled dHash index. Loads every card_hash row
 //  (4 orientations per card) once, then Hamming-scans a query dHash against all
 //  of them, keeping the best (smallest) distance per card. ~92k 64-bit popcount
-//  comparisons — microseconds. The 4 stored orientations make matching robust
-//  to a card photographed rotated.
+//  comparisons. The 4 stored orientations make matching robust to a card
+//  photographed rotated.
+//
+//  The index is immutable once loaded, so the type is `nonisolated` (the
+//  project defaults every type to @MainActor) and `Sendable`: callers run the
+//  scan off the main thread, which is what keeps the live scanner from
+//  stuttering the UI on older devices at one frame every 180 ms.
 //
 
 import Foundation
@@ -18,8 +23,7 @@ struct CardMatch: Equatable, Sendable {
     var confidence: Double { 1 - Double(distance) / 64 }
 }
 
-@MainActor
-final class CardHashMatcher {
+nonisolated final class CardHashMatcher: Sendable {
     struct Entry: Sendable { let cardID: String; let dhash: UInt64 }
     private let entries: [Entry]
 

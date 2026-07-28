@@ -34,8 +34,16 @@ import UIKit
     @ObservationIgnored private var stabilizer = ScanStabilizer()
     /// Monotonic token so a slow price/detail lookup can't overwrite a newer lock.
     @ObservationIgnored private var lookupToken = 0
+    /// One match at a time: matching is now off-main, and dropping frames while
+    /// one is in flight keeps the stabilizer's streak in capture order.
+    @ObservationIgnored private var isMatching = false
+    /// Size of the on-screen preview, set by the view. The analyzed crop is
+    /// sized against it so it matches what the reticle shows on this device.
+    @ObservationIgnored var previewSize: CGSize = .zero
 
     private(set) var isReady = false
+    /// Pixel size of the frames we're analyzing (the reticle is derived from it).
+    private(set) var frameSize = CameraScanner.frameSize
     var locked: Locked?
     /// Sticky quick-add target + default condition for a bulk run.
     var destination: Destination = .collection
@@ -59,19 +67,33 @@ import UIKit
     /// A live camera frame (already throttled by the capture layer). Locks a
     /// card only after it's topped the shortlist for a few consecutive frames.
     func ingestFrame(_ frame: CGImage) {
-        guard let matcher else { return }
-        let matches = SingleCardScanner.matches(in: frame, using: matcher)
-        if let newID = stabilizer.ingest(matches) {
-            let confidence = matches.first?.confidence ?? 0
-            Task { await lock(cardID: newID, confidence: confidence) }
+        guard let matcher, !isMatching else { return }
+        isMatching = true
+        let size = CGSize(width: frame.width, height: frame.height)
+        if size != frameSize { frameSize = size }
+        let viewSize = previewSize
+        Task {
+            let matches = await Self.matches(in: frame, viewSize: viewSize, using: matcher)
+            isMatching = false
+            guard let newID = stabilizer.ingest(matches) else { return }
+            await lock(cardID: newID, confidence: matches.first?.confidence ?? 0)
         }
+    }
+
+    /// The crop + dHash + full-index Hamming scan. `nonisolated async` puts it
+    /// on the concurrent executor, so only the shortlist comes back to main.
+    private nonisolated static func matches(
+        in frame: CGImage, viewSize: CGSize, using matcher: CardHashMatcher
+    ) async -> [CardMatch] {
+        SingleCardScanner.matches(in: frame, viewSize: viewSize, using: matcher)
     }
 
     /// One-shot identification from a chosen still (the Simulator / no-camera
     /// path), which bypasses the multi-frame streak requirement.
     func scanStill(_ frame: CGImage) async {
         guard let matcher else { return }
-        let matches = SingleCardScanner.matches(in: frame, using: matcher)
+        // A chosen photo isn't the preview, so the crop uses frame limits only.
+        let matches = await Self.matches(in: frame, viewSize: .zero, using: matcher)
         guard let top = matches.first, top.confidence >= 0.5 else {
             lastActionText = "No card recognized — try a clearer photo."
             clearActionSoon()

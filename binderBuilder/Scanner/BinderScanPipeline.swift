@@ -22,14 +22,16 @@ struct ScanSlotResult: Identifiable, Sendable {
     var chosen: CardMatch?
 }
 
-@MainActor
-enum BinderScanPipeline {
+nonisolated enum BinderScanPipeline {
     /// Fraction of each cell trimmed on every side to avoid sleeve seams.
     static let cellInset: CGFloat = 0.10
     /// Below this normalized luminance variance a pocket reads as empty.
     static let emptyVarianceThreshold: Double = 0.0025
 
-    static func scan(page: CGImage, matcher: CardHashMatcher) -> [ScanSlotResult] {
+    /// Nine crops, each hashed and matched against the whole index. `async` and
+    /// `nonisolated`, so the work lands on the concurrent executor and the
+    /// review sheet's "Scanning…" spinner keeps animating.
+    static func scan(page: CGImage, matcher: CardHashMatcher) async -> [ScanSlotResult] {
         let width = CGFloat(page.width), height = CGFloat(page.height)
         let cellW = width / 3, cellH = height / 3
         var results: [ScanSlotResult] = []

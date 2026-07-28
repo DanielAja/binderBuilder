@@ -69,18 +69,24 @@ struct FastScanView: View {
         }
     }
 
+    /// Outlines exactly the pixels we hash: the preview fills the screen with
+    /// `.resizeAspectFill`, so the reticle is the screen projection of the
+    /// analyzed crop. `ignoresSafeArea` puts this in the preview's coordinate
+    /// space, which is what makes the two agree on every device aspect.
     private var reticle: some View {
         GeometryReader { geo in
-            let h = geo.size.height * 0.62
-            let w = h * SingleCardScanner.cardAspect
+            let rect = SingleCardScanner.visibleCropRect(frameSize: model.frameSize,
+                                                         viewSize: geo.size)
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(model.locked == nil ? Color.white.opacity(0.7) : Color.green,
                               lineWidth: 3)
-                .frame(width: w, height: h)
-                .position(x: geo.size.width / 2, y: geo.size.height * 0.42)
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
                 .shadow(radius: 6)
                 .animation(.easeInOut(duration: 0.2), value: model.locked != nil)
+                .onChange(of: geo.size, initial: true) { model.previewSize = geo.size }
         }
+        .ignoresSafeArea()
         .allowsHitTesting(false)
     }
 
@@ -96,9 +102,12 @@ struct FastScanView: View {
                 ForEach(LiveScanModel.Destination.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 220)
+            // Takes the width that's left (up to a cap) rather than a fixed
+            // 220 pt, so neither segment truncates at 375 pt or larger text.
+            .frame(maxWidth: 340)
+            .layoutPriority(1)
 
-            Spacer()
+            Spacer(minLength: 0)
 
             Menu {
                 Picker("Condition", selection: $model.defaultCondition) {
@@ -207,6 +216,9 @@ private struct ResultCard: View {
     let locked: LiveScanModel.Locked
     let model: LiveScanModel
     let env: AppEnvironment
+    /// The one-tap add target grows with Dynamic Type, capped so the row still
+    /// fits the card thumbnail and its details on a 375 pt screen.
+    @ScaledMetric(relativeTo: .title) private var addSize: CGFloat = 36
 
     private var variants: [CardVariant] {
         let available = CardVariant.allCases.filter { locked.card.availableVariants.contains($0) }
@@ -273,7 +285,7 @@ private struct ResultCard: View {
         VStack(spacing: 8) {
             Button { model.quickAdd() } label: {
                 Image(systemName: locked.added ? "checkmark.circle.fill" : "plus.circle.fill")
-                    .font(.system(size: 36))
+                    .font(.system(size: min(addSize, 52)))
                     .foregroundStyle(locked.added ? .green : Color.accentColor)
                     .symbolEffect(.bounce, value: locked.added)
             }
