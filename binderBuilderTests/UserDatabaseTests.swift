@@ -16,9 +16,10 @@ struct UserDatabaseTests {
                 db,
                 sql: "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'grdb_%' AND name NOT LIKE 'sqlite_%' ORDER BY name")
         }
-        #expect(tables == ["binder", "card_copy", "card_group", "display_case", "group_member",
-                           "known_set", "price_alert", "price_cache", "slot_assignment",
-                           "trade", "trade_item", "trade_list", "value_snapshot", "wishlist"])
+        #expect(tables == ["binder", "card_copy", "card_group", "display_case", "drop_subscription",
+                           "favorite_store", "group_member", "known_set", "price_alert",
+                           "price_cache", "slot_assignment", "trade", "trade_item", "trade_list",
+                           "value_snapshot", "wishlist"])
     }
 
     @Test func v4CreatesHotPathIndices() throws {

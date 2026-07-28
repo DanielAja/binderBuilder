@@ -1,0 +1,53 @@
+{
+  "retrieved": "2026-07-28",
+  "releases": [
+    {
+      "id": "curated-delta-reign",
+      "name": "Delta Reign",
+      "series": "Mega Evolution",
+      "date": "2026-11-06",
+      "confidence": "expected",
+      "source": "ICv2/PokeGuardian calendar, retrieved 2026-07-28 — not yet TCGdex-listed (latest live set at retrieval is me05 \"Pitch Black\", 2026-07-17); next-in-series id/date are projected, not confirmed."
+    },
+    {
+      "id": "curated-30th-celebration",
+      "name": "Pokémon TCG 30th Anniversary Celebration",
+      "series": "Special",
+      "date": "2026-09-16",
+      "confidence": "expected",
+      "source": "ICv2/PokeGuardian calendar, retrieved 2026-07-28 — anniversary tie-in reported ahead of an official set listing; not yet present in the TCGdex sets index."
+    },
+    {
+      "id": "curated-holiday-collection-2026",
+      "name": "Holiday Calendar 2026",
+      "series": "Mega Evolution",
+      "month": "2026-12",
+      "confidence": "expected",
+      "source": "ICv2/PokeGuardian calendar, retrieved 2026-07-28"
+    },
+    {
+      "id": "curated-premium-collection-q1-2027",
+      "name": "Charizard ex Premium Collection",
+      "series": "Mega Evolution",
+      "month": "2027-01",
+      "confidence": "expected",
+      "source": "ICv2/PokeGuardian calendar, retrieved 2026-07-28"
+    },
+    {
+      "id": "curated-me07-main-set",
+      "name": "Mega Evolution Series — Q1 2027 Expansion",
+      "series": "Mega Evolution",
+      "month": "2027-02",
+      "confidence": "expected",
+      "source": "ICv2/PokeGuardian calendar, retrieved 2026-07-28"
+    },
+    {
+      "id": "curated-spring-2027-value-box",
+      "name": "Spring 2027 Value Box Collection",
+      "series": "Mega Evolution",
+      "month": "2027-03",
+      "confidence": "expected",
+      "source": "ICv2/PokeGuardian calendar, retrieved 2026-07-28"
+    }
+  ]
+}

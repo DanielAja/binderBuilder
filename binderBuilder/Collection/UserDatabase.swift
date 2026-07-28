@@ -180,6 +180,25 @@ nonisolated final class UserDatabase: Sendable {
                 ALTER TABLE wishlist ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
                 """)
         }
+        // v6 — drops & delight: per-release subscription toggles for upcoming
+        // set/product alerts, and the user's saved local/big-box stores used
+        // to scope drop-radius notifications.
+        migrator.registerMigration("v6") { db in
+            try db.execute(sql: """
+                CREATE TABLE drop_subscription (
+                  release_id TEXT PRIMARY KEY,
+                  enabled INTEGER NOT NULL DEFAULT 1,
+                  created_at REAL NOT NULL
+                );
+                CREATE TABLE favorite_store (
+                  id TEXT PRIMARY KEY,
+                  name TEXT NOT NULL, address TEXT,
+                  latitude REAL NOT NULL, longitude REAL NOT NULL,
+                  kind TEXT NOT NULL DEFAULT 'other',
+                  added_at REAL NOT NULL
+                );
+                """)
+        }
         return migrator
     }
 }

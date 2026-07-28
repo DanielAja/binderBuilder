@@ -16,6 +16,8 @@ import Observation
         static let priceAlerts = "priceAlertsEnabled"
         static let newReleaseAlerts = "newReleaseAlertsEnabled"
         static let icloudSync = "icloudSyncEnabled"
+        static let dropAlerts = "dropAlertsEnabled"
+        static let dropRadiusMiles = "dropRadiusMiles"
     }
 
     private enum KeychainKey {
@@ -51,6 +53,16 @@ import Observation
         didSet { defaults.set(icloudSyncEnabled, forKey: DefaultsKey.icloudSync) }
     }
 
+    /// Notify when a subscribed upcoming release drops at a nearby store.
+    var dropAlertsEnabled: Bool {
+        didSet { defaults.set(dropAlertsEnabled, forKey: DefaultsKey.dropAlerts) }
+    }
+
+    /// Radius (in miles) around the user's favorite stores to consider "nearby" for drop alerts.
+    var dropRadiusMiles: Double {
+        didSet { defaults.set(dropRadiusMiles, forKey: DefaultsKey.dropRadiusMiles) }
+    }
+
     /// eBay application id (client id), Keychain-backed. nil/empty deletes.
     var ebayAppID: String? {
         didSet { writeCredential(ebayAppID, key: KeychainKey.ebayAppID) }
@@ -69,6 +81,8 @@ import Observation
         self.priceAlertsEnabled = defaults.bool(forKey: DefaultsKey.priceAlerts)
         self.newReleaseAlertsEnabled = defaults.bool(forKey: DefaultsKey.newReleaseAlerts)
         self.icloudSyncEnabled = defaults.bool(forKey: DefaultsKey.icloudSync)
+        self.dropAlertsEnabled = defaults.bool(forKey: DefaultsKey.dropAlerts)
+        self.dropRadiusMiles = defaults.object(forKey: DefaultsKey.dropRadiusMiles) as? Double ?? 25
         self.ebayAppID = keychain.string(for: KeychainKey.ebayAppID)
         self.ebayCertID = keychain.string(for: KeychainKey.ebayCertID)
     }
