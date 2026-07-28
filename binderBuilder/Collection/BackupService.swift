@@ -18,15 +18,32 @@ struct BackupData: Codable {
         var gradeCompany: String?, gradeValue: Double?, acquiredPrice: Double?
         var acquiredAt: Double, notes: String?
     }
-    struct Wish: Codable { var cardID, variant: String; var addedAt: Double }
+    struct Wish: Codable {
+        var cardID, variant: String; var addedAt: Double
+        // v3: trade target + show priority (optional to read older backups).
+        var targetMode: String?; var targetAmount: Double?; var priority: Int?
+    }
     struct Binder: Codable { var id, name, coverColor: String; var pageCount, sortOrder: Int; var createdAt: Double }
     struct Slot: Codable { var binderID: String; var pageIndex, side, slotIndex: Int; var cardID, variant: String }
     struct Display: Codable { var position: Int; var cardID, variant: String }
     struct Group: Codable { var id, name, color: String; var sortOrder: Int; var createdAt: Double }
     struct Member: Codable { var groupID, cardID, variant: String }
     struct Alert: Codable { var cardID, variant, kind: String; var threshold: Double; var baseline: Double?; var createdAt: Double }
+    // v3: trade log + for-trade list.
+    struct Trade: Codable {
+        var id: String; var date: Double; var counterparty, event, location: String?
+        var cashDelta: Double; var notes: String?; var createdAt: Double
+    }
+    struct TradeItem: Codable {
+        var id, tradeID, direction, cardID, variant, condition: String
+        var quantity: Int; var valueEach: Double?; var note: String?
+    }
+    struct Listing: Codable {
+        var id, cardID, variant, condition: String; var quantity: Int
+        var valueMode: String; var valueAmount: Double?; var note: String?; var addedAt: Double
+    }
 
-    var version = 2
+    var version = 3
     var copies: [Copy] = []
     var wishes: [Wish] = []
     var binders: [Binder] = []
@@ -35,6 +52,12 @@ struct BackupData: Codable {
     var groups: [Group] = []
     var members: [Member] = []
     var alerts: [Alert] = []
+    // v3: optional, not defaulted — the synthesized Decodable ignores property
+    // defaults, so a non-Optional array would make every v2 backup (on-device
+    // and in iCloud) fail to restore with `keyNotFound`. Read as `?? []`.
+    var trades: [Trade]?
+    var tradeItems: [TradeItem]?
+    var listings: [Listing]?
 }
 
 enum BackupService {
@@ -48,7 +71,8 @@ enum BackupService {
                       notes: $0["notes"])
             }
             out.wishes = try Row.fetchAll(db, sql: "SELECT * FROM wishlist").map {
-                .init(cardID: $0["card_id"], variant: $0["variant"], addedAt: $0["added_at"] as Double? ?? 0)
+                .init(cardID: $0["card_id"], variant: $0["variant"], addedAt: $0["added_at"] as Double? ?? 0,
+                      targetMode: $0["target_mode"], targetAmount: $0["target_amount"], priority: $0["priority"])
             }
             out.binders = try Row.fetchAll(db, sql: "SELECT * FROM binder").map {
                 .init(id: $0["id"], name: $0["name"], coverColor: $0["cover_color"],
@@ -74,6 +98,21 @@ enum BackupService {
                       threshold: $0["threshold"], baseline: $0["baseline"],
                       createdAt: $0["created_at"] as Double? ?? 0)
             }
+            out.trades = try Row.fetchAll(db, sql: "SELECT * FROM trade").map {
+                .init(id: $0["id"], date: $0["date"] as Double? ?? 0, counterparty: $0["counterparty"],
+                      event: $0["event"], location: $0["location"], cashDelta: $0["cash_delta"] as Double? ?? 0,
+                      notes: $0["notes"], createdAt: $0["created_at"] as Double? ?? 0)
+            }
+            out.tradeItems = try Row.fetchAll(db, sql: "SELECT * FROM trade_item").map {
+                .init(id: $0["id"], tradeID: $0["trade_id"], direction: $0["direction"], cardID: $0["card_id"],
+                      variant: $0["variant"], condition: $0["condition"], quantity: $0["quantity"] as Int? ?? 1,
+                      valueEach: $0["value_each"], note: $0["note"])
+            }
+            out.listings = try Row.fetchAll(db, sql: "SELECT * FROM trade_list").map {
+                .init(id: $0["id"], cardID: $0["card_id"], variant: $0["variant"], condition: $0["condition"],
+                      quantity: $0["quantity"] as Int? ?? 1, valueMode: $0["value_mode"] as String? ?? "market",
+                      valueAmount: $0["value_amount"], note: $0["note"], addedAt: $0["added_at"] as Double? ?? 0)
+            }
             return out
         }
         let encoder = JSONEncoder()
@@ -86,7 +125,8 @@ enum BackupService {
         let backup = try JSONDecoder().decode(BackupData.self, from: jsonData)
         try database.queue.write { db in
             for table in ["card_copy", "wishlist", "slot_assignment", "display_case",
-                          "group_member", "card_group", "price_alert", "binder"] {
+                          "group_member", "card_group", "price_alert", "binder",
+                          "trade_item", "trade", "trade_list"] {
                 try db.execute(sql: "DELETE FROM \(table)")
             }
             for b in backup.binders {
@@ -104,8 +144,13 @@ enum BackupService {
                                 c.acquiredPrice, c.acquiredAt, c.notes])
             }
             for w in backup.wishes {
-                try db.execute(sql: "INSERT OR IGNORE INTO wishlist (card_id, variant, added_at) VALUES (?,?,?)",
-                               arguments: [w.cardID, w.variant, w.addedAt])
+                try db.execute(
+                    sql: """
+                    INSERT OR IGNORE INTO wishlist (card_id, variant, added_at, target_mode, target_amount, priority)
+                    VALUES (?,?,?,?,?,?)
+                    """,
+                    arguments: [w.cardID, w.variant, w.addedAt,
+                                w.targetMode ?? "market", w.targetAmount, w.priority ?? 0])
             }
             for s in backup.slots {
                 try db.execute(
@@ -130,6 +175,30 @@ enum BackupService {
                 try db.execute(
                     sql: "INSERT OR IGNORE INTO price_alert (card_id, variant, kind, threshold, baseline, created_at) VALUES (?,?,?,?,?,?)",
                     arguments: [a.cardID, a.variant, a.kind, a.threshold, a.baseline, a.createdAt])
+            }
+            // `?? []` — a v2 payload has no trade keys at all. The tables above
+            // are still cleared, so restoring a v2 backup drops trade data by
+            // design (it replaces *all* user data with the backup's contents).
+            for t in backup.trades ?? [] {
+                try db.execute(
+                    sql: "INSERT INTO trade (id, date, counterparty, event, location, cash_delta, notes, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                    arguments: [t.id, t.date, t.counterparty, t.event, t.location, t.cashDelta, t.notes, t.createdAt])
+            }
+            for i in backup.tradeItems ?? [] {
+                try db.execute(
+                    sql: """
+                    INSERT INTO trade_item (id, trade_id, direction, card_id, variant, condition, quantity, value_each, note)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                    """,
+                    arguments: [i.id, i.tradeID, i.direction, i.cardID, i.variant, i.condition, i.quantity, i.valueEach, i.note])
+            }
+            for l in backup.listings ?? [] {
+                try db.execute(
+                    sql: """
+                    INSERT INTO trade_list (id, card_id, variant, condition, quantity, value_mode, value_amount, note, added_at)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                    """,
+                    arguments: [l.id, l.cardID, l.variant, l.condition, l.quantity, l.valueMode, l.valueAmount, l.note, l.addedAt])
             }
         }
     }

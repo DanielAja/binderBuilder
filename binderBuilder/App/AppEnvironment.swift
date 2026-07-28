@@ -26,6 +26,8 @@ final class AppEnvironment {
     let binders: BinderStore
     let prices: PriceStore
     let alerts: AlertStore
+    let trades: TradeStore
+    let tradeList: TradeListStore
     let stats: CollectionStatsStore
     let cloud: CloudSyncService
     let errors: ErrorPresenter
@@ -82,6 +84,8 @@ final class AppEnvironment {
         binders = BinderStore(database: database, catalog: catalog, isOwned: { collection.isOwned($0) })
         prices = PriceStore(database: database, catalog: catalog, settings: settings)
         alerts = AlertStore(database: database)
+        trades = TradeStore(database: database)
+        tradeList = TradeListStore(database: database)
         cloud = CloudSyncService(database: database)
         stats = CollectionStatsStore(catalog: catalog, collection: collection, database: database)
         let cache = ImageCache.standard()
@@ -100,7 +104,9 @@ final class AppEnvironment {
         async let g: Void = groups.load()
         async let b: Void = binders.load()
         async let a: Void = alerts.load()
-        _ = await (c, w, g, b, a)
+        async let t: Void = trades.load()
+        async let tl: Void = tradeList.load()
+        _ = await (c, w, g, b, a, t, tl)
 
         await DemoSeed.seedIfNeeded(
             settings: settings, catalog: catalog, collection: collection, binders: binders

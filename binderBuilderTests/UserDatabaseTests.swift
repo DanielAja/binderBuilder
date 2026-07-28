@@ -18,7 +18,7 @@ struct UserDatabaseTests {
         }
         #expect(tables == ["binder", "card_copy", "card_group", "display_case", "group_member",
                            "known_set", "price_alert", "price_cache", "slot_assignment",
-                           "value_snapshot", "wishlist"])
+                           "trade", "trade_item", "trade_list", "value_snapshot", "wishlist"])
     }
 
     @Test func v4CreatesHotPathIndices() throws {

@@ -13,6 +13,9 @@ struct HomeView: View {
     let env: AppEnvironment
     @Binding var selectedTab: RootTab
     @State private var showingScan = false
+    @State private var showingFastScan = ProcessInfo.processInfo.arguments.contains("-showFastScan")
+    @State private var showingTrade = ProcessInfo.processInfo.arguments.contains("-showTrade")
+    @State private var showingTradeEditor = ProcessInfo.processInfo.arguments.contains("-tradeEditorDemo")
     @State private var shownValue = 0.0
     @ScaledMetric(relativeTo: .largeTitle) private var valueFontSize: CGFloat = 40
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -41,6 +44,9 @@ struct HomeView: View {
             .navigationDestination(for: CardSummary.self) { CardDetailView(card: $0, env: env) }
             .navigationDestination(for: SetInfo.self) { SetCardsView(set: $0, env: env) }
             .sheet(isPresented: $showingScan) { ScanView(env: env) }
+            .fullScreenCover(isPresented: $showingFastScan) { FastScanView(env: env) }
+            .sheet(isPresented: $showingTrade) { ConventionView(env: env) }
+            .sheet(isPresented: $showingTradeEditor) { TradeEditorView(env: env, existing: TradeEditorView.demoTrade) }
             .task { await stats.refreshIfNeeded(); animateValue() }
             .onChange(of: stats.totalValue) { _, _ in animateValue() }
             .refreshable { await stats.refresh() }
@@ -145,12 +151,20 @@ struct HomeView: View {
 
     private var quickActions: some View {
         VStack(spacing: 10) {
-            Button { selectedTab = .binder } label: {
-                actionLabel("Open Binder", systemImage: "book.fill")
+            Button { showingFastScan = true } label: {
+                actionLabel("Fast Scan — Live Price", systemImage: "camera.viewfinder")
             }.buttonStyle(.borderedProminent)
             HStack(spacing: 10) {
+                Button { showingTrade = true } label: {
+                    actionLabel("Trade", systemImage: "arrow.left.arrow.right")
+                }.buttonStyle(.bordered)
+                Button { selectedTab = .binder } label: {
+                    actionLabel("Binder", systemImage: "book.fill")
+                }.buttonStyle(.bordered)
+            }
+            HStack(spacing: 10) {
                 Button { showingScan = true } label: {
-                    actionLabel("Scan", systemImage: "camera.viewfinder")
+                    actionLabel("Scan Page", systemImage: "square.grid.3x3.fill")
                 }.buttonStyle(.bordered)
                 Button { selectedTab = .browse } label: {
                     actionLabel("Browse", systemImage: "magnifyingglass")

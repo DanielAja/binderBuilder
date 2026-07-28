@@ -19,6 +19,9 @@ import os
     private static let logger = Logger(subsystem: "com.aja.binderBuilder", category: "WishlistStore")
 
     private(set) var wished: Set<CardRef> = []
+    /// Per-ref trade target (what you'd give to acquire it) + show priority.
+    /// Only present for wished refs; absent entries mean "market / priority 0".
+    private(set) var targetsByRef: [CardRef: (value: TradeValue, priority: Int)] = [:]
     private(set) var changeToken: Int = 0
 
     init(database: UserDatabase) {
@@ -35,9 +38,28 @@ import os
                 }
             }
             wished = Set(refs)
+            targetsByRef = (try? await database.wishlistTargets()) ?? [:]
             changeToken &+= 1
         } catch {
             Self.logger.error("failed to load wishlist: \(String(describing: error))")
+        }
+    }
+
+    /// The user's target trade value for a wished ref (defaults to market).
+    func target(for ref: CardRef) -> TradeValue { targetsByRef[ref]?.value ?? .market }
+
+    /// Show priority (higher = more wanted); 0 when unset.
+    func priority(for ref: CardRef) -> Int { targetsByRef[ref]?.priority ?? 0 }
+
+    /// Sets the trade target + priority for a ref, wishing it first if needed.
+    func setTarget(_ ref: CardRef, value: TradeValue, priority: Int = 0) {
+        if !isWished(ref) { set(ref, wished: true) }
+        do {
+            try database.setWishlistTarget(ref, value: value, priority: priority)
+            targetsByRef[ref] = (value, priority)
+            changeToken &+= 1
+        } catch {
+            Self.logger.error("wishlist setTarget failed: \(String(describing: error))")
         }
     }
 
@@ -63,7 +85,7 @@ import os
                         arguments: [ref.cardID, ref.variant.rawValue])
                 }
             }
-            if isWished { wished.insert(ref) } else { wished.remove(ref) }
+            if isWished { wished.insert(ref) } else { wished.remove(ref); targetsByRef[ref] = nil }
             changeToken &+= 1
         } catch {
             Self.logger.error("wishlist set failed: \(String(describing: error))")

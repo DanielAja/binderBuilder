@@ -144,6 +144,42 @@ nonisolated final class UserDatabase: Sendable {
                   ON group_member(group_id);
                 """)
         }
+        // v5 — trade log, for-trade list, and wishlist target values (the
+        // convention/trading feature). `cash_delta` is signed from the user's
+        // POV (+ received, − paid); trade_item rows are frozen value snapshots.
+        migrator.registerMigration("v5") { db in
+            try db.execute(sql: """
+                CREATE TABLE trade (
+                  id TEXT PRIMARY KEY,
+                  date REAL NOT NULL,
+                  counterparty TEXT, event TEXT, location TEXT,
+                  cash_delta REAL NOT NULL DEFAULT 0,
+                  notes TEXT, created_at REAL NOT NULL
+                );
+                CREATE TABLE trade_item (
+                  id TEXT PRIMARY KEY,
+                  trade_id TEXT NOT NULL REFERENCES trade(id) ON DELETE CASCADE,
+                  direction TEXT NOT NULL,
+                  card_id TEXT NOT NULL, variant TEXT NOT NULL,
+                  condition TEXT NOT NULL DEFAULT 'NM',
+                  quantity INTEGER NOT NULL DEFAULT 1,
+                  value_each REAL, note TEXT
+                );
+                CREATE INDEX idx_trade_item_trade ON trade_item(trade_id);
+                CREATE TABLE trade_list (
+                  id TEXT PRIMARY KEY,
+                  card_id TEXT NOT NULL, variant TEXT NOT NULL,
+                  condition TEXT NOT NULL DEFAULT 'NM',
+                  quantity INTEGER NOT NULL DEFAULT 1,
+                  value_mode TEXT NOT NULL DEFAULT 'market', value_amount REAL,
+                  note TEXT, added_at REAL NOT NULL
+                );
+                CREATE INDEX idx_trade_list_card ON trade_list(card_id, variant);
+                ALTER TABLE wishlist ADD COLUMN target_mode TEXT NOT NULL DEFAULT 'market';
+                ALTER TABLE wishlist ADD COLUMN target_amount REAL;
+                ALTER TABLE wishlist ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
+                """)
+        }
         return migrator
     }
 }

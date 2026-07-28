@@ -106,6 +106,14 @@ struct CardDetailView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    Button {
+                        let listed = env.tradeList.toggle(ref)
+                        Haptics.selection()
+                        showToast(listed ? "Listed for trade" : "Removed from For-Trade")
+                    } label: {
+                        Label(env.tradeList.isListed(ref) ? "Remove from For-Trade" : "List for Trade",
+                              systemImage: env.tradeList.isListed(ref) ? "arrow.left.arrow.right.circle.fill" : "arrow.left.arrow.right")
+                    }
                     Button { showAlertEditor = true } label: {
                         Label(env.alerts.alert(for: ref) != nil ? "Edit Price Alert…" : "Set Price Alert…",
                               systemImage: env.alerts.alert(for: ref) != nil ? "bell.fill" : "bell")

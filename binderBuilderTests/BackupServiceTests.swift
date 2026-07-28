@@ -77,4 +77,79 @@ import Testing
         #expect(alerts2.alert(for: holo)?.kind == .percentDrop)
         #expect(alerts2.alert(for: holo)?.baseline == 400)
     }
+
+    /// A payload exactly as the v2 exporter wrote it: no `trades` /
+    /// `tradeItems` / `listings` keys at all, and wishes without the v3 target
+    /// fields. Every backup already on a user's device (and in iCloud) looks
+    /// like this — the synthesized Decodable ignores property defaults, so
+    /// non-Optional v3 arrays would make all of them fail with `keyNotFound`.
+    private static let v2BackupJSON = """
+        {
+          "version": 2,
+          "copies": [
+            {"id": "copy-1", "cardID": "base1-4", "variant": "holo", "condition": "LP",
+             "acquiredPrice": 500, "acquiredAt": 1700000000}
+          ],
+          "wishes": [
+            {"cardID": "base1-2", "variant": "normal", "addedAt": 1700000001}
+          ],
+          "binders": [
+            {"id": "binder-1", "name": "Old Binder", "coverColor": "#1B6CA8",
+             "pageCount": 2, "sortOrder": 0, "createdAt": 1700000002}
+          ],
+          "slots": [
+            {"binderID": "binder-1", "pageIndex": 0, "side": 0, "slotIndex": 0,
+             "cardID": "base1-4", "variant": "holo"}
+          ],
+          "displays": [],
+          "groups": [],
+          "members": [],
+          "alerts": []
+        }
+        """
+
+    @Test func restoresLegacyV2BackupWithoutTradeKeys() async throws {
+        let user = try UserDatabase.inMemory()
+        let holo = CardRef(cardID: "base1-4", variant: .holo)
+
+        // v3 data already on the device, to pin the restore's clear semantics.
+        let trades = TradeStore(database: user)
+        let list = TradeListStore(database: user)
+        var existing = Trade(counterparty: "Sam", cashDelta: -10)
+        existing.items = [TradeItem(ref: holo, direction: .outgoing, valueEach: 42)]
+        trades.save(existing)
+        list.save(TradeListing(ref: holo, condition: .lp, quantity: 3, value: .fixed(25)))
+
+        try BackupService.restore(Data(Self.v2BackupJSON.utf8), into: user)
+
+        // The v2 content came through.
+        let collection = CollectionStore(database: user)
+        await collection.load()
+        #expect(collection.quantity(of: holo) == 1)
+        #expect(collection.copies(of: holo).first?.condition == .lp)
+        #expect(collection.copies(of: holo).first?.acquiredPrice == 500)
+
+        let binders = BinderStore(database: user, catalog: nil, isOwned: { _ in false })
+        await binders.load()
+        #expect(binders.binders.first?.name == "Old Binder")
+        #expect(binders.firstEmptySlot(binderID: "binder-1") ==
+                SlotLocation(binderID: "binder-1", pageIndex: 0, side: .front, slotIndex: 1))
+
+        // Missing v3 target fields fall back to the column defaults.
+        let wishlist = WishlistStore(database: user)
+        await wishlist.load()
+        let wish = CardRef(cardID: "base1-2", variant: .normal)
+        #expect(wishlist.isWished(wish))
+        #expect(wishlist.target(for: wish) == .market)
+        #expect(wishlist.priority(for: wish) == 0)
+
+        // Restore replaces *all* user data, so a v2 payload leaves the trade
+        // tables empty rather than merging the pre-existing v3 rows.
+        let trades2 = TradeStore(database: user)
+        await trades2.load()
+        #expect(trades2.count == 0)
+        let list2 = TradeListStore(database: user)
+        await list2.load()
+        #expect(list2.listings.isEmpty)
+    }
 }
