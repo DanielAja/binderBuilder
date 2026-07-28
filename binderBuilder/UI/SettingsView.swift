@@ -21,6 +21,9 @@ struct SettingsView: View {
     /// True while an export/import is in flight; disables the Backup buttons
     /// so a second tap can't overlap the first.
     @State private var backupBusy = false
+    /// Debug/deep-link: -showDrops opens the Drops screen once this tab loads
+    /// (RootTabView routes the initial tab for the same flag).
+    @State private var showingDrops = DebugLaunchState.launchFlag("-showDrops")
 
     private var cloudStatusText: String? {
         switch env.cloud.status {
@@ -67,6 +70,16 @@ struct SettingsView: View {
             }
             .onChange(of: settings.priceAlertsEnabled) { _, on in if on { Task { await NotificationService.requestAuthorization() } } }
             .onChange(of: settings.newReleaseAlertsEnabled) { _, on in if on { Task { await NotificationService.requestAuthorization() } } }
+
+            Section {
+                Toggle("Release-date reminders", isOn: $settings.dropAlertsEnabled)
+                NavigationLink("Release calendar & stores") { DropsView(env: env) }
+            } header: {
+                Text("Drops")
+            } footer: {
+                Text("Drops are release-date reminders, not live stock alerts — no free app can see what is actually on a store's shelf. We remind you what is coming and where you saved stores to look.")
+            }
+            .onChange(of: settings.dropAlertsEnabled) { _, on in if on { Task { await NotificationService.requestAuthorization() } } }
 
             Section {
                 if backupBusy {
@@ -130,6 +143,7 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .sheet(isPresented: $showingDrops) { NavigationStack { DropsView(env: env) } }
         .fileExporter(isPresented: $exporting, document: exportDocument,
                       contentType: .json, defaultFilename: "binderbuilder-backup") { _ in }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in

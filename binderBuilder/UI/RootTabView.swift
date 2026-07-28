@@ -25,7 +25,9 @@ struct RootTabView: View {
             _tab = State(initialValue: .browse)
         } else if DebugLaunchState.launchFlag("-showCollection") {
             _tab = State(initialValue: .collection)
-        } else if DebugLaunchState.launchFlag("-showSettings") {
+        } else if DebugLaunchState.launchFlag("-showSettings") || DebugLaunchState.launchFlag("-showDrops") {
+            // -showDrops routes here too; SettingsView presents DropsView as
+            // a sheet once this tab loads (see its own showingDrops flag).
             _tab = State(initialValue: .settings)
         } else if DebugLaunchState.launchFlag("-showCardDetail") || DebugLaunchState.launchFlag("-showScan") {
             // Both flags are handled inside BinderSceneView.onAppear, which
