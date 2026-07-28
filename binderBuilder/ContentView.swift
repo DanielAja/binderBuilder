@@ -38,11 +38,13 @@ struct ContentView: View {
             if phase == .background, env.settings.icloudSyncEnabled { Task { await env.cloud.push() } }
         }
         .task {
+            #if DEBUG
             // Smoke test: -fireTestAlert requests notifications + fires one.
             if ProcessInfo.processInfo.arguments.contains("-fireTestAlert") {
                 await NotificationService.requestAuthorization()
                 NotificationService.fire(title: "Binder Builder", body: "Price alerts are working ✅")
             }
+            #endif
         }
     }
 

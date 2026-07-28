@@ -71,7 +71,7 @@ final class CardInteractionController {
         guard let card = collectCards().first else { return }
         pullOut(card)
         // Debug only: zero the foil so text is legible in verification shots.
-        if ProcessInfo.processInfo.arguments.contains("-noHolo"),
+        if DebugLaunchState.launchFlag("-noHolo"),
            var model = card.components[ModelComponent.self],
            var mat = model.materials.first as? CustomMaterial {
             var v = mat.custom.value; v.x = 0; mat.custom.value = v

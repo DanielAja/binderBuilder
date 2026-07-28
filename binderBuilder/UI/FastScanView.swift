@@ -175,7 +175,7 @@ struct FastScanView: View {
 
     private func start() async {
         await model.prepare()
-        if ProcessInfo.processInfo.arguments.contains("-fastScanDemo") {
+        if DebugLaunchState.launchFlag("-fastScanDemo") {
             await model.injectDemo(cardID: "base1-4")
             return
         }

@@ -54,8 +54,8 @@ struct BinderSceneView: View {
         }
         .sheet(isPresented: $debugScan) { ScanView(env: env) }
         .onAppear {
-            if ProcessInfo.processInfo.arguments.contains("-showScan") { debugScan = true }
-            if ProcessInfo.processInfo.arguments.contains("-showCardDetail") {
+            if DebugLaunchState.launchFlag("-showScan") { debugScan = true }
+            if DebugLaunchState.launchFlag("-showCardDetail") {
                 Task {
                     if let detail = try? await env.catalog?.card(id: "base1-4") {
                         debugDetail = detail.summary

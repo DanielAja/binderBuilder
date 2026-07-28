@@ -21,11 +21,11 @@ struct RootTabView: View {
     init(env: AppEnvironment) {
         self.env = env
         // Debug/deep-link: -uiState binderOpen|cardFloating opens the Binder tab.
-        if ProcessInfo.processInfo.arguments.contains("-showSets") {
+        if DebugLaunchState.launchFlag("-showSets") {
             _tab = State(initialValue: .browse)
-        } else if ProcessInfo.processInfo.arguments.contains("-showCollection") {
+        } else if DebugLaunchState.launchFlag("-showCollection") {
             _tab = State(initialValue: .collection)
-        } else if ProcessInfo.processInfo.arguments.contains("-showSettings") {
+        } else if DebugLaunchState.launchFlag("-showSettings") {
             _tab = State(initialValue: .settings)
         } else {
             switch DebugLaunchState.current.uiState {

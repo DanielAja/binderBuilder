@@ -16,7 +16,7 @@ struct BrowseView: View {
 
     init(env: AppEnvironment) {
         self.env = env
-        _mode = State(initialValue: ProcessInfo.processInfo.arguments.contains("-showSets") ? .sets : .search)
+        _mode = State(initialValue: DebugLaunchState.launchFlag("-showSets") ? .sets : .search)
     }
 
     var body: some View {

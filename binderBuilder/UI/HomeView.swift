@@ -13,9 +13,9 @@ struct HomeView: View {
     let env: AppEnvironment
     @Binding var selectedTab: RootTab
     @State private var showingScan = false
-    @State private var showingFastScan = ProcessInfo.processInfo.arguments.contains("-showFastScan")
-    @State private var showingTrade = ProcessInfo.processInfo.arguments.contains("-showTrade")
-    @State private var showingTradeEditor = ProcessInfo.processInfo.arguments.contains("-tradeEditorDemo")
+    @State private var showingFastScan = DebugLaunchState.launchFlag("-showFastScan")
+    @State private var showingTrade = DebugLaunchState.launchFlag("-showTrade")
+    @State private var showingTradeEditor = DebugLaunchState.launchFlag("-tradeEditorDemo")
     @State private var shownValue = 0.0
     @ScaledMetric(relativeTo: .largeTitle) private var valueFontSize: CGFloat = 40
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

@@ -36,7 +36,29 @@ struct DebugLaunchState {
     let tilt: SIMD2<Float>?
     let deformer: Deformer?
 
-    static let current = DebugLaunchState(arguments: ProcessInfo.processInfo.arguments)
+    static let current = DebugLaunchState(arguments: launchArguments)
+
+    /// Debug-only launch arguments; always empty in Release so no argument
+    /// parsing (here or at any call site routed through `launchFlag`) is
+    /// reachable in App Store builds.
+    private static var launchArguments: [String] {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments
+        #else
+        return []
+        #endif
+    }
+
+    /// Shared helper for the simple boolean-flag call sites scattered across
+    /// the UI (e.g. `-showSets`, `-fireTestAlert`) — keeps them free of
+    /// `ProcessInfo`/`#if DEBUG` and guaranteed-false in Release.
+    static func launchFlag(_ name: String) -> Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains(name)
+        #else
+        return false
+        #endif
+    }
 
     init(arguments: [String]) {
         func value(after flag: String) -> String? {
