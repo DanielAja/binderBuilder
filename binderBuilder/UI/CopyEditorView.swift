@@ -21,6 +21,7 @@ struct CopyEditorView: View {
     @State private var gradeValue = 10.0
     @State private var acquiredPrice = ""
     @State private var notes = ""
+    @FocusState private var priceFieldFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -49,6 +50,7 @@ struct CopyEditorView: View {
                         Text("Paid")
                         TextField("0.00", text: $acquiredPrice)
                             .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                            .focused($priceFieldFocused)
                     }
                     TextField("Notes", text: $notes, axis: .vertical).lineLimit(1...4)
                 }
@@ -61,11 +63,16 @@ struct CopyEditorView: View {
                     }
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(existing == nil ? "Add Copy" : "Edit Copy")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save") { save() } }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { priceFieldFocused = false }
+                }
             }
             .onAppear(perform: loadExisting)
         }

@@ -24,6 +24,7 @@ struct TradeEditorView: View {
     /// picking a direction with a still-zero amount doesn't collapse back to none.
     @State private var cashDirection: Int
     @State private var cashAmount: Double
+    @FocusState private var cashFieldFocused: Bool
 
     init(env: AppEnvironment, existing: Trade? = nil) {
         self.env = env
@@ -55,6 +56,7 @@ struct TradeEditorView: View {
                     }
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(isNew ? "New Trade" : "Edit Trade")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -62,6 +64,10 @@ struct TradeEditorView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }.bold()
                         .disabled(trade.items.isEmpty && trade.cashDelta == 0)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { cashFieldFocused = false }
                 }
             }
             .sheet(item: $picking) { direction in
@@ -130,6 +136,7 @@ struct TradeEditorView: View {
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(maxWidth: 140)
+                        .focused($cashFieldFocused)
                 }
             }
         }
@@ -229,6 +236,7 @@ private struct TradeItemEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var item: TradeItem
     @State private var summary: CardSummary?
+    @FocusState private var valueFieldFocused: Bool
 
     init(item: TradeItem, env: AppEnvironment, onSave: @escaping (TradeItem) -> Void) {
         self.env = env
@@ -267,18 +275,24 @@ private struct TradeItemEditorView: View {
                     Spacer()
                     TextField("0.00", value: valueBinding, format: .currency(code: "USD"))
                         .keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(maxWidth: 120)
+                        .focused($valueFieldFocused)
                     Button { Task { await refetchValue() } } label: { Image(systemName: "arrow.clockwise") }
                         .buttonStyle(.borderless)
                 }
                 TextField("Note", text: Binding(
                     get: { item.note ?? "" }, set: { item.note = $0.isEmpty ? nil : $0 }))
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Card")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { onSave(item); dismiss() }.bold()
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { valueFieldFocused = false }
                 }
             }
             .task { summary = try? await env.catalog?.card(id: item.ref.cardID)?.summary }

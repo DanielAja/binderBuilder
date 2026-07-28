@@ -12,6 +12,22 @@ struct StatsView: View {
     let env: AppEnvironment
     private var stats: CollectionStatsStore { env.stats }
 
+    // Derived, sorted rows for the rarity/type breakdowns, computed in
+    // `recomputeBreakdowns()` rather than inline in the `@ViewBuilder` (which
+    // re-sorted the dictionary on every render).
+    @State private var rarityRows: [(key: String, value: Int)] = []
+    @State private var typeRows: [(key: String, value: Int)] = []
+
+    /// Static + pure so it's cheap to hoist out of the view builder.
+    nonisolated static func sortedCounts(_ counts: [String: Int]) -> [(key: String, value: Int)] {
+        counts.sorted { $0.value > $1.value }
+    }
+
+    private func recomputeBreakdowns() {
+        rarityRows = Self.sortedCounts(stats.rarityCounts)
+        typeRows = Self.sortedCounts(stats.typeCounts)
+    }
+
     var body: some View {
         List {
             Section("Overview") {
@@ -22,11 +38,11 @@ struct StatsView: View {
                 row("Sets completed", "\(stats.setsCompleted)")
             }
 
-            if !stats.rarityCounts.isEmpty {
-                Section("By Rarity") { breakdown(stats.rarityCounts) }
+            if !rarityRows.isEmpty {
+                Section("By Rarity") { breakdown(rarityRows) }
             }
-            if !stats.typeCounts.isEmpty {
-                Section("By Type") { breakdown(stats.typeCounts) }
+            if !typeRows.isEmpty {
+                Section("By Type") { breakdown(typeRows) }
             }
 
             if !stats.topValuable.isEmpty {
@@ -59,7 +75,12 @@ struct StatsView: View {
         }
         .navigationTitle("Stats")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await stats.refreshIfNeeded() }
+        .task {
+            await stats.refreshIfNeeded()
+            recomputeBreakdowns()
+        }
+        .onChange(of: stats.rarityCounts) { recomputeBreakdowns() }
+        .onChange(of: stats.typeCounts) { recomputeBreakdowns() }
     }
 
     private func row(_ title: String, _ value: String) -> some View {
@@ -67,8 +88,7 @@ struct StatsView: View {
     }
 
     @ViewBuilder
-    private func breakdown(_ counts: [String: Int]) -> some View {
-        let sorted = counts.sorted { $0.value > $1.value }
+    private func breakdown(_ sorted: [(key: String, value: Int)]) -> some View {
         let maxCount = sorted.first?.value ?? 1
         ForEach(sorted, id: \.key) { entry in
             VStack(alignment: .leading, spacing: 3) {

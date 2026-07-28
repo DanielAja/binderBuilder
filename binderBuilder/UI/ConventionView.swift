@@ -21,6 +21,12 @@ struct ConventionView: View {
     @State private var market: [CardRef: Double] = [:]
     @State private var summaries: [String: CardSummary] = [:]
 
+    // Derived totals/order, computed in `recompute()` (not in `body`), so
+    // switching tabs or scrolling doesn't re-sort/re-reduce every render.
+    @State private var forTradeTotal: Double = 0
+    @State private var wantRefs: [CardRef] = []
+    @State private var wantTotal: Double = 0
+
     @State private var creatingTrade = false
     @State private var editingTrade: Trade?
     @State private var addingListing = false
@@ -88,7 +94,6 @@ struct ConventionView: View {
 
     private var forTradeList: some View {
         let listings = env.tradeList.listings
-        let total = listings.reduce(0.0) { $0 + (resolved($1.value, ref: $1.ref) ?? 0) * Double($1.quantity) }
         return Group {
             if listings.isEmpty {
                 emptyState("Nothing listed for trade", "Add cards you're willing to trade away, each with your asking price.",
@@ -97,7 +102,7 @@ struct ConventionView: View {
                 List {
                     Section {
                         summaryRow("For-trade value", "\(listings.count) card\(listings.count == 1 ? "" : "s")",
-                                   amount: total)
+                                   amount: forTradeTotal)
                     }
                     ForEach(listings) { listing in
                         Button { editingListing = listing } label: {
@@ -106,7 +111,10 @@ struct ConventionView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .onDelete { offsets in offsets.map { listings[$0].id }.forEach(env.tradeList.remove) }
+                    .onDelete { offsets in
+                        offsets.map { listings[$0].id }.forEach(env.tradeList.remove)
+                        recompute()
+                    }
                 }
                 .listStyle(.plain)
             }
@@ -116,20 +124,16 @@ struct ConventionView: View {
     // MARK: - Wants
 
     private var wantsList: some View {
-        let refs = env.wishlist.wishedRefs().sorted {
-            (env.wishlist.priority(for: $0), $0.cardID) > (env.wishlist.priority(for: $1), $1.cardID)
-        }
-        let total = refs.reduce(0.0) { $0 + (resolved(env.wishlist.target(for: $1), ref: $1) ?? 0) }
-        return Group {
-            if refs.isEmpty {
+        Group {
+            if wantRefs.isEmpty {
                 emptyState("No wants yet", "Add cards you're hunting for and set the value you'd trade for each.",
                            system: "heart.text.square") { addingWant = true }
             } else {
                 List {
                     Section {
-                        summaryRow("Want value", "\(refs.count) card\(refs.count == 1 ? "" : "s")", amount: total)
+                        summaryRow("Want value", "\(wantRefs.count) card\(wantRefs.count == 1 ? "" : "s")", amount: wantTotal)
                     }
-                    ForEach(refs, id: \.self) { ref in
+                    ForEach(wantRefs, id: \.self) { ref in
                         Button { editingWant = ref } label: {
                             WantRow(ref: ref, summary: summaries[ref.cardID],
                                     target: env.wishlist.target(for: ref),
@@ -138,7 +142,10 @@ struct ConventionView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .onDelete { offsets in offsets.forEach { env.wishlist.set(refs[$0], wished: false) } }
+                    .onDelete { offsets in
+                        offsets.forEach { env.wishlist.set(wantRefs[$0], wished: false) }
+                        recompute()
+                    }
                 }
                 .listStyle(.plain)
             }
@@ -235,11 +242,13 @@ struct ConventionView: View {
     private func addListing(_ card: CardSummary) {
         let ref = CardRef(cardID: card.id, variant: LiveScanModel.primaryVariant(of: card))
         env.tradeList.save(TradeListing(ref: ref))
+        recompute()
     }
 
     private func addWant(_ card: CardSummary) {
         let ref = CardRef(cardID: card.id, variant: LiveScanModel.primaryVariant(of: card))
         env.wishlist.set(ref, wished: true)
+        recompute()
     }
 
     private func reload() { Task { await reloadAsync() } }
@@ -247,12 +256,44 @@ struct ConventionView: View {
     private func reloadAsync() async {
         let refs = Set(env.tradeList.listings.map(\.ref))
             .union(env.wishlist.wishedRefs())
-        guard let catalog = env.catalog, !refs.isEmpty else { return }
-        market = (try? await catalog.bundledMarket(for: Array(refs))) ?? market
-        let ids = Array(Set(refs.map(\.cardID)))
-        if let loaded = try? await catalog.summaries(forCardIDs: ids) {
-            summaries = Dictionary(loaded.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        if let catalog = env.catalog, !refs.isEmpty {
+            market = (try? await catalog.bundledMarket(for: Array(refs))) ?? market
+            let ids = Array(Set(refs.map(\.cardID)))
+            if let loaded = try? await catalog.summaries(forCardIDs: ids) {
+                summaries = Dictionary(loaded.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            }
         }
+        recompute()
+    }
+
+    /// Recomputes the For Trade total and the sorted Wants list + total from
+    /// the current stores/market snapshot. Cheap (sort/reduce, no I/O), so
+    /// it's safe to call directly after any local mutation as well as after
+    /// `reloadAsync()`, instead of leaving these in `body`.
+    private func recompute() {
+        forTradeTotal = Self.totalForTrade(env.tradeList.listings, market: market)
+        wantRefs = Self.sortedWantRefs(env.wishlist.wished, targets: env.wishlist.targetsByRef)
+        wantTotal = Self.totalWant(wantRefs, targets: env.wishlist.targetsByRef, market: market)
+    }
+
+    /// Total asking value across for-trade listings. Static + pure so it's
+    /// cheap to hoist out of `body`.
+    nonisolated static func totalForTrade(_ listings: [TradeListing], market: [CardRef: Double]) -> Double {
+        listings.reduce(0.0) { $0 + ($1.value.resolve(market: market[$1.ref]) ?? 0) * Double($1.quantity) }
+    }
+
+    /// Wished refs sorted by show priority (desc), then card id.
+    nonisolated static func sortedWantRefs(
+        _ wished: Set<CardRef>, targets: [CardRef: (value: TradeValue, priority: Int)]
+    ) -> [CardRef] {
+        wished.sorted { (targets[$0]?.priority ?? 0, $0.cardID) > (targets[$1]?.priority ?? 0, $1.cardID) }
+    }
+
+    /// Total target trade value across the given wished refs.
+    nonisolated static func totalWant(
+        _ refs: [CardRef], targets: [CardRef: (value: TradeValue, priority: Int)], market: [CardRef: Double]
+    ) -> Double {
+        refs.reduce(0.0) { $0 + ((targets[$1]?.value ?? .market).resolve(market: market[$1]) ?? 0) }
     }
 }
 
@@ -301,7 +342,7 @@ private struct WantRow: View {
                 HStack(spacing: 4) {
                     if priority > 0 {
                         ForEach(0..<min(priority, 3), id: \.self) { _ in
-                            Image(systemName: "star.fill").font(.system(size: 8)).foregroundStyle(.yellow)
+                            Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow)
                         }
                     }
                     Text("will trade \(target.label)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
@@ -371,6 +412,7 @@ private struct TradeListingEditorView: View {
                 TextField("Note", text: Binding(
                     get: { listing.note ?? "" }, set: { listing.note = $0.isEmpty ? nil : $0 }))
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("For Trade")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -415,6 +457,7 @@ private struct WantTargetEditorView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Want Target")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

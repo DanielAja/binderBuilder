@@ -16,6 +16,7 @@ struct AlertEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var kind: AlertKind = .belowTarget
     @State private var thresholdText = ""
+    @FocusState private var thresholdFieldFocused: Bool
 
     private var existing: PriceAlert? { env.alerts.alert(for: ref) }
 
@@ -31,6 +32,7 @@ struct AlertEditorView: View {
                         Text(kind == .belowTarget ? "Target price" : "Percent drop")
                         TextField(kind == .belowTarget ? "0.00" : "10", text: $thresholdText)
                             .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                            .focused($thresholdFieldFocused)
                     }
                 } footer: {
                     if let currentPrice {
@@ -47,11 +49,16 @@ struct AlertEditorView: View {
                     }
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Price Alert")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save") { save() }.disabled(!canSave) }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { thresholdFieldFocused = false }
+                }
             }
             .onAppear {
                 if let existing {

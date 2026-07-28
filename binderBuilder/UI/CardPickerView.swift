@@ -73,6 +73,7 @@ struct TradeValueEditor: View {
     @Binding var value: TradeValue
     /// The reference market price, to preview the resolved dollar figure.
     var market: Double?
+    @FocusState private var amountFieldFocused: Bool
 
     private enum Kind: String, CaseIterable { case market = "Market", percent = "% of Market", fixed = "Fixed $" }
 
@@ -134,6 +135,7 @@ struct TradeValueEditor: View {
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(maxWidth: 120)
+                        .focused($amountFieldFocused)
                 }
             }
 
@@ -143,6 +145,12 @@ struct TradeValueEditor: View {
             } else {
                 Text("Market price unknown yet")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { amountFieldFocused = false }
             }
         }
     }

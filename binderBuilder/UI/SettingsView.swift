@@ -18,6 +18,9 @@ struct SettingsView: View {
     @State private var statusMessage: String?
     @State private var cloudRestored = false
     @State private var confirmRestore = false
+    /// True while an export/import is in flight; disables the Backup buttons
+    /// so a second tap can't overlap the first.
+    @State private var backupBusy = false
 
     private var cloudStatusText: String? {
         switch env.cloud.status {
@@ -46,7 +49,9 @@ struct SettingsView: View {
 
             Section("Collection") {
                 LabeledContent("Cards owned", value: "\(env.collection.ownedCount)")
-                LabeledContent("Binders", value: "\(env.binders.binders.count)")
+                NavigationLink { BinderManagerView(env: env) } label: {
+                    LabeledContent("Binders", value: "\(env.binders.binders.count)")
+                }
             }
 
             Section {
@@ -64,14 +69,23 @@ struct SettingsView: View {
             .onChange(of: settings.newReleaseAlertsEnabled) { _, on in if on { Task { await NotificationService.requestAuthorization() } } }
 
             Section {
+                if backupBusy {
+                    HStack { Spacer(); ProgressView(); Spacer() }
+                }
                 Button {
-                    if let data = try? BackupService.export(env.userDatabase) {
-                        exportDocument = BackupDocument(data: data); exporting = true
+                    backupBusy = true
+                    Task {
+                        defer { backupBusy = false }
+                        if let data = try? BackupService.export(env.userDatabase) {
+                            exportDocument = BackupDocument(data: data); exporting = true
+                        }
                     }
                 } label: { Label("Export collection", systemImage: "square.and.arrow.up") }
+                    .disabled(backupBusy)
                 Button {
                     importing = true
                 } label: { Label("Import collection…", systemImage: "square.and.arrow.down") }
+                    .disabled(backupBusy)
             } header: {
                 Text("Backup")
             } footer: {
@@ -120,14 +134,23 @@ struct SettingsView: View {
                       contentType: .json, defaultFilename: "binderbuilder-backup") { _ in }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
             guard case .success(let url) = result else { return }
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            do {
-                let data = try Data(contentsOf: url)
-                try BackupService.restore(data, into: env.userDatabase)
-                statusMessage = "Imported. Relaunch the app to see your collection."
-            } catch {
-                statusMessage = "Import failed: \(error.localizedDescription)"
+            backupBusy = true
+            Task {
+                defer { backupBusy = false }
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    // The read itself (which may have to download an iCloud
+                    // Drive file) runs off-main; only the GRDB restore below
+                    // has to stay on the main actor.
+                    let data = try await Task.detached(priority: .userInitiated) {
+                        try Data(contentsOf: url)
+                    }.value
+                    try BackupService.restore(data, into: env.userDatabase)
+                    statusMessage = "Imported. Relaunch the app to see your collection."
+                } catch {
+                    statusMessage = "Import failed: \(error.localizedDescription)"
+                }
             }
         }
         .alert("Backup", isPresented: Binding(get: { statusMessage != nil },

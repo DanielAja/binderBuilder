@@ -3,12 +3,11 @@
 //  binderBuilder
 //
 //  Virtual MotionProvider for the simulator (and `-simulatedMotion` on
-//  device). A programmatic target tilt — set by MotionDebugOverlay's
-//  joystick or by tests — is chased with an exactly-integrated critically
-//  damped spring, so the simulated attitude eases to its target with no
-//  overshoot. `injectShake()` adds a decaying oscillatory userAcceleration
-//  impulse. Gravity is derived by rotating `MotionSample.restGravity` by the
-//  simulated attitude.
+//  device). A programmatic target tilt — set by tests via `setTargetTilt` —
+//  is chased with an exactly-integrated critically damped spring, so the
+//  simulated attitude eases to its target with no overshoot. `injectShake()`
+//  adds a decaying oscillatory userAcceleration impulse. Gravity is derived
+//  by rotating `MotionSample.restGravity` by the simulated attitude.
 //
 //  Tilt convention (radians):
 //    pitch — rotation about the device/scene X axis (top of device away/toward you)

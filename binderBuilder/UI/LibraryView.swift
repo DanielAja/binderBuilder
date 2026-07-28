@@ -2,31 +2,12 @@
 //  LibraryView.swift
 //  binderBuilder
 //
-//  The 2D companion to the 3D binder, presented as a sheet: tabs for searching
-//  the catalog, browsing sets, managing binders, and settings. Card rows push
-//  to CardDetailView.
+//  Card search (used by BrowseView) and the shared CardRow used across
+//  search/browse lists. Card rows push to CardDetailView.
 //
 
 import SwiftUI
 import UIKit
-
-struct LibraryView: View {
-    let env: AppEnvironment
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        TabView {
-            NavigationStack { SearchView(env: env) }
-                .tabItem { Label("Search", systemImage: "magnifyingglass") }
-            NavigationStack { SetBrowserView(env: env) }
-                .tabItem { Label("Sets", systemImage: "square.grid.2x2") }
-            NavigationStack { BinderManagerView(env: env) }
-                .tabItem { Label("Binders", systemImage: "books.vertical") }
-            NavigationStack { SettingsView(env: env) }
-                .tabItem { Label("Settings", systemImage: "gearshape") }
-        }
-    }
-}
 
 struct SearchView: View {
     let env: AppEnvironment

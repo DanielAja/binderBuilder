@@ -44,7 +44,7 @@ struct CardDetailView: View {
                     cardID: card.id, imageBase: card.imageBase, quality: .high,
                     owned: owned, imageCache: env.imageCache
                 )
-                .frame(maxHeight: 380)
+                .containerRelativeFrame(.vertical) { h, _ in min(h * 0.45, 480) }
                 .shadow(radius: 12, y: 6)
                 .padding(.top, 8)
 

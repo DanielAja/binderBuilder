@@ -203,6 +203,8 @@ private struct StatTile: View {
 
 private struct SetProgressCard: View {
     let progress: SetProgress
+    @ScaledMetric(relativeTo: .body) private var cardWidth: CGFloat = 180
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(progress.setInfo.name).font(.subheadline.weight(.semibold)).lineLimit(1)
@@ -215,7 +217,7 @@ private struct SetProgressCard: View {
                     .foregroundStyle(progress.isComplete ? .green : .primary)
             }
         }
-        .frame(width: 180)
+        .frame(width: cardWidth)
         .padding(12)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
     }

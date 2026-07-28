@@ -128,18 +128,29 @@ struct SetCardsView: View {
     @ScaledMetric(relativeTo: .largeTitle) private var sealSize: CGFloat = 56
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    // Derived rows, computed in `recompute()` (on load / filter change / any
+    // ownership mutation), not in `body` — this set can have ~400 cards, so
+    // filtering + an isOwned lookup per card on every render/scroll adds up.
+    @State private var ownedCount: Int = 0
+    @State private var shown: [CardSummary] = []
+
     enum OwnFilter: String, CaseIterable { case all = "All", owned = "Owned", missing = "Missing" }
 
     private let columns = [GridItem(.adaptive(minimum: 96), spacing: 12)]
 
-    private var ownedCount: Int { cards.filter(isOwned).count }
-
-    private var shown: [CardSummary] {
+    /// Static + pure for the same reason SetBrowserView hoists its rows.
+    nonisolated static func filterShown(_ cards: [CardSummary], filter: OwnFilter, ownedIDs: Set<String>) -> [CardSummary] {
         switch filter {
         case .all: return cards
-        case .owned: return cards.filter(isOwned)
-        case .missing: return cards.filter { !isOwned($0) }
+        case .owned: return cards.filter { ownedIDs.contains($0.id) }
+        case .missing: return cards.filter { !ownedIDs.contains($0.id) }
         }
+    }
+
+    private func recompute() {
+        let ownedIDs = Set(cards.filter(isOwned).map(\.id))
+        ownedCount = ownedIDs.count
+        shown = Self.filterShown(cards, filter: filter, ownedIDs: ownedIDs)
     }
 
     var body: some View {
@@ -183,7 +194,10 @@ struct SetCardsView: View {
         .task(id: set.id) {
             cards = (try? await env.catalog?.cards(inSet: set.id)) ?? []
             env.imageCache.prefetch(cards, quality: .low, pinned: false)
+            recompute()
         }
+        .onChange(of: filter) { recompute() }
+        .onChange(of: env.collection.changeToken) { recompute() }
         .overlay {
             if celebrate {
                 ZStack {
