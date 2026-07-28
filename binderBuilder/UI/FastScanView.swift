@@ -21,8 +21,23 @@ struct FastScanView: View {
     @State private var scanner = CameraScanner()
     @State private var pickerItem: PhotosPickerItem?
     @State private var cameraDenied = false
+    /// 0->1 progress driving the on-lock glintSweep flash across the frame.
+    @State private var glintProgress: Double = 0
+    /// The post-dismiss reveal, shown when the scanner closes with queued adds.
+    @State private var showingReveal = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var useCamera: Bool { CameraScanner.hasCamera }
+
+    /// Tint for the lock-flash + reveal queue, reusing the same $5/$25
+    /// language as LiveScanModel.hapticForPrice via RevealTier.
+    private func tierColor(_ tier: RevealTier) -> Color {
+        switch tier {
+        case .common: return .white
+        case .notable: return Color(red: 0.6, green: 0.82, blue: 1.0)
+        case .chase: return Color(red: 1.0, green: 0.83, blue: 0.35)
+        }
+    }
 
     init(env: AppEnvironment) {
         self.env = env
@@ -33,6 +48,7 @@ struct FastScanView: View {
         ZStack {
             background
             reticle
+            lockGlintFlash
             VStack {
                 topBar
                 Spacer()
@@ -53,7 +69,14 @@ struct FastScanView: View {
         .animation(.spring(duration: 0.3), value: model.locked)
         .task { await start() }
         .onChange(of: pickerItem) { _, item in Task { await scanPhoto(item) } }
+        .onChange(of: model.locked?.card.id) { _, newID in flashLockGlint(newID: newID) }
         .onDisappear { scanner.stop() }
+        .fullScreenCover(isPresented: $showingReveal) {
+            RevealView(items: model.revealQueue) {
+                model.clearRevealQueue()
+                dismiss()
+            }
+        }
     }
 
     // MARK: - Layers
@@ -90,9 +113,47 @@ struct FastScanView: View {
         .allowsHitTesting(false)
     }
 
+    /// A brief tier-tinted glintSweep flash across the reticle's rect the
+    /// instant a card locks — skipped entirely under Reduce Motion.
+    ///
+    /// glintSweep scales its highlight by the destination alpha (so it reads
+    /// on real content without ever exceeding it), so the base needs real
+    /// alpha to shine on — a tier-tinted fill gated by the same `glintProgress`
+    /// that positions the sweep, so the whole thing is invisible at rest and
+    /// only appears for the flash.
+    @ViewBuilder
+    private var lockGlintFlash: some View {
+        if !reduceMotion {
+            GeometryReader { geo in
+                let rect = SingleCardScanner.visibleCropRect(frameSize: model.frameSize, viewSize: geo.size)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(tierColor(RevealTier.tier(forPrice: model.locked?.price?.amount)).opacity(0.4))
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+                    .glintSweep(progress: glintProgress)
+                    .opacity(glintProgress)
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Drives the 220ms lock flash on a genuinely new lock (a card ID that
+    /// wasn't already locked) — not on every price/variant update, which
+    /// re-equals `Locked` too but shouldn't re-flash.
+    private func flashLockGlint(newID: String?) {
+        guard !reduceMotion, newID != nil else { return }
+        glintProgress = 0
+        withAnimation(.spring(duration: 0.22)) { glintProgress = 1 }
+        Task {
+            try? await Task.sleep(for: .milliseconds(220))
+            glintProgress = 0
+        }
+    }
+
     private var topBar: some View {
         HStack(spacing: 12) {
-            Button { dismiss() } label: {
+            Button { closeScanner() } label: {
                 Image(systemName: "xmark")
                     .font(.headline).padding(10).background(.ultraThinMaterial, in: Circle())
             }
@@ -187,6 +248,17 @@ struct FastScanView: View {
     }
 
     // MARK: - Actions
+
+    /// The explicit close path: if the run queued any adds, show the reveal
+    /// first (it clears the queue + dismisses itself on its own close);
+    /// otherwise just dismiss the scanner directly.
+    private func closeScanner() {
+        if model.hasRevealQueue {
+            showingReveal = true
+        } else {
+            dismiss()
+        }
+    }
 
     private func start() async {
         await model.prepare()

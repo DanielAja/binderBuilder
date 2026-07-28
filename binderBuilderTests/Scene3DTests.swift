@@ -197,6 +197,33 @@ struct CameraRayTests {
     }
 }
 
+/// `RecentAdditions` (CardFloatSystem) + `firstFloatGlint` (MotionUpdateSystem):
+/// the "first touch" glint bump a newly-added card gets the first time it
+/// floats — fires exactly once per marked cardID, then clears.
+struct FirstFloatGlintTests {
+    @Test func recentAdditionsConsumeFiresOnceThenClears() {
+        let registry = RecentAdditions.shared
+        registry.mark(cardID: "test-glint-card")
+        #expect(registry.consume(cardID: "test-glint-card") == true)
+        // Already claimed: a second float of the same card doesn't re-glint.
+        #expect(registry.consume(cardID: "test-glint-card") == false)
+        // Never marked: no-op, not a crash.
+        #expect(registry.consume(cardID: "never-marked-card") == false)
+    }
+
+    @Test func firstFloatGlintEnvelopeStartsHighThenEndsAtZero() {
+        // Bigger than the ordinary ambient shimmer at the same progress.
+        let bumped = MotionUpdateSystem.firstFloatGlint(progress: MotionUpdateSystem.shimmerDuration / 2)
+        let ordinary = MotionUpdateSystem.shimmerSweep(elapsed: MotionUpdateSystem.shimmerDuration / 2)
+        #expect(bumped > ordinary)
+        #expect(bumped > 0)
+        // Spent once elapsed reaches the bump duration — the caller then
+        // clears CardFloatComponent.firstTouchGlint so it never repeats.
+        #expect(MotionUpdateSystem.firstFloatGlint(progress: MotionUpdateSystem.shimmerDuration) == 0)
+        #expect(MotionUpdateSystem.firstFloatGlint(progress: MotionUpdateSystem.shimmerDuration + 1) == 0)
+    }
+}
+
 @MainActor
 struct CameraFramingTests {
     private let fov: Float = 55

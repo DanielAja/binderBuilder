@@ -36,6 +36,9 @@ final class MotionUpdateSystem: System {
     nonisolated static let shimmerPeriod: Float = 4.5
     nonisolated static let shimmerDuration: Float = 0.9
     nonisolated static let shimmerAmount: Float = 2.4
+    /// Amplitude multiplier for the one-shot "first touch" glint bump played
+    /// when a `CardFloatComponent.firstTouchGlint`-flagged card first floats.
+    nonisolated static let firstFloatGlintMultiplier: Float = 1.8
 
     private var elapsed: Float = 0
 
@@ -72,6 +75,15 @@ final class MotionUpdateSystem: System {
         return sin((t / shimmerDuration) * .pi) * shimmerAmount
     }
 
+    /// The one-shot, non-repeating "first touch" glint: same envelope shape as
+    /// `shimmerSweep` but bigger and never repeating — `progress` is the time
+    /// (s) since the bump started, and it's spent (0) once it clears
+    /// `shimmerDuration`, at which point the caller consumes the flag.
+    nonisolated static func firstFloatGlint(progress: Float) -> Float {
+        guard progress >= 0, progress < shimmerDuration else { return 0 }
+        return sin((progress / shimmerDuration) * .pi) * shimmerAmount * firstFloatGlintMultiplier
+    }
+
     func update(context: SceneUpdateContext) {
         elapsed += Float(context.deltaTime)
 
@@ -87,8 +99,22 @@ final class MotionUpdateSystem: System {
             guard let card = entity as? ModelEntity,
                   var model = card.components[ModelComponent.self],
                   var material = model.materials.first as? CustomMaterial else { continue }
-            let floating = entity.components.has(CardFloatComponent.self)
-            let extra: Float = floating ? shimmer : 0
+            var extra: Float = 0
+            if var f = entity.components[CardFloatComponent.self] {
+                if f.firstTouchGlint {
+                    // A flagged card gets its one-shot bump instead of the
+                    // periodic ambient shimmer, then the flag is consumed.
+                    extra = Self.firstFloatGlint(progress: f.glintElapsed)
+                    f.glintElapsed += Float(context.deltaTime)
+                    if f.glintElapsed >= Self.shimmerDuration {
+                        f.firstTouchGlint = false
+                        f.glintElapsed = 0
+                    }
+                    entity.components.set(f)
+                } else {
+                    extra = shimmer
+                }
+            }
             let targetZ: Float = phase.x + extra
             var value = material.custom.value
             if value.z == targetZ && value.w == phase.y { continue }

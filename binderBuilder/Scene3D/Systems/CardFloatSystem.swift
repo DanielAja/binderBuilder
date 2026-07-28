@@ -12,6 +12,7 @@
 //     back to CardPlacementSystem.
 //
 
+import Foundation
 import RealityKit
 import simd
 
@@ -33,6 +34,47 @@ struct CardFloatComponent: Component {
     var spin: SIMD3<Float> = .zero
     /// True while the finger is rotating the card (suppresses auto-orient/spin).
     var userControlled: Bool = false
+    /// Set true (by CardFloatSystem, from `RecentAdditions`) the first time a
+    /// recently-added card floats; MotionUpdateSystem plays one amplified
+    /// shimmer bump off it, then clears it back to false. Never set by the
+    /// creator of the component (CardInteractionController) — see
+    /// `RecentAdditions` below.
+    var firstTouchGlint: Bool = false
+    /// Elapsed time (s) into the one-shot glint bump; owned by MotionUpdateSystem.
+    var glintElapsed: Float = 0
+}
+
+/// Session-scoped registry of card IDs considered "recently added", so the
+/// *first* time one of them floats it gets an extra glint (see
+/// `CardFloatComponent.firstTouchGlint` / `MotionUpdateSystem.firstFloatGlint`).
+///
+/// Nothing in this cluster owns "a card was just added" (that's LiveScanModel
+/// / CardInteractionController — other clusters' files), so this is wired
+/// end-to-end but self-contained: HomeView marks the cardIDs behind its
+/// "Recent Pulls" strip on load (real recent-additions data, already at hand).
+/// For tighter same-session timing, any other call site can also call
+/// `RecentAdditions.shared.mark(cardID:)` directly on a fresh add — e.g. one
+/// line in LiveScanModel.quickAdd() — that hookup is left for whoever owns
+/// that file.
+nonisolated final class RecentAdditions: @unchecked Sendable {
+    static let shared = RecentAdditions()
+
+    private let lock = NSLock()
+    private var ids: Set<String> = []
+
+    private init() {}
+
+    func mark(cardID: String) {
+        lock.lock(); defer { lock.unlock() }
+        ids.insert(cardID)
+    }
+
+    /// True at most once per cardID — removes it, so the glint fires a single time.
+    @discardableResult
+    func consume(cardID: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return ids.remove(cardID) != nil
+    }
 }
 
 @MainActor
@@ -62,6 +104,14 @@ final class CardFloatSystem: System {
 
         for entity in context.entities(matching: Self.query, updatingSystemWhen: .rendering) {
             guard var f = entity.components[CardFloatComponent.self] else { continue }
+
+            // First-float glint: claim it once from the session registry (a
+            // no-op once claimed or if this cardID was never marked).
+            if !f.firstTouchGlint, f.glintElapsed == 0,
+               let cardID = entity.components[CardSlotComponent.self]?.ref.cardID,
+               RecentAdditions.shared.consume(cardID: cardID) {
+                f.firstTouchGlint = true
+            }
 
             // Position: critically-damped spring (root-local == world).
             var pos = entity.position

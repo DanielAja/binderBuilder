@@ -204,6 +204,7 @@ struct SetCardsView: View {
                     if !reduceMotion { ConfettiView() }
                     VStack(spacing: 8) {
                         Image(systemName: "checkmark.seal.fill").font(.system(size: sealSize)).foregroundStyle(.green)
+                            .tiltShimmer()
                             .accessibilityHidden(true)
                         Text("Set Complete! 🎉").font(.title2.bold())
                         Text(set.name).foregroundStyle(.secondary)

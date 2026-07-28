@@ -2,9 +2,10 @@
 //  HomeView.swift
 //  binderBuilder
 //
-//  Collection dashboard: portfolio value + trend, headline stats, sets in
-//  progress (completion rings), most-valuable and recently-added cards, and
-//  quick actions. Powered by CollectionStatsStore (cached aggregates).
+//  Collection dashboard: portfolio value + trend, headline stats, quick
+//  actions, a tap-to-replay "Recent Pulls" strip, sets in progress
+//  (completion rings), and most-valuable cards. Powered by
+//  CollectionStatsStore (cached aggregates).
 //
 
 import SwiftUI
@@ -16,6 +17,7 @@ struct HomeView: View {
     @State private var showingFastScan = DebugLaunchState.launchFlag("-showFastScan")
     @State private var showingTrade = DebugLaunchState.launchFlag("-showTrade")
     @State private var showingTradeEditor = DebugLaunchState.launchFlag("-tradeEditorDemo")
+    @State private var showingRecentPullsReplay = false
     @State private var shownValue = 0.0
     @ScaledMetric(relativeTo: .largeTitle) private var valueFontSize: CGFloat = 40
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -34,9 +36,9 @@ struct HomeView: View {
                     valueCard
                     statTiles
                     quickActions
+                    if !stats.recent.isEmpty { recentPulls }
                     if !stats.setProgress.isEmpty { setsInProgress }
                     if !stats.topValuable.isEmpty { mostValuable }
-                    if !stats.recent.isEmpty { recentlyAdded }
                 }
                 .padding()
             }
@@ -47,7 +49,17 @@ struct HomeView: View {
             .fullScreenCover(isPresented: $showingFastScan) { FastScanView(env: env) }
             .sheet(isPresented: $showingTrade) { ConventionView(env: env) }
             .sheet(isPresented: $showingTradeEditor) { TradeEditorView(env: env, existing: TradeEditorView.demoTrade) }
-            .task { await stats.refreshIfNeeded(); animateValue() }
+            .fullScreenCover(isPresented: $showingRecentPullsReplay) {
+                RevealView(items: recentPullItems) { showingRecentPullsReplay = false }
+            }
+            .task {
+                await stats.refreshIfNeeded()
+                animateValue()
+                // So a recently-added card gets its one-time float glint the
+                // first time it's pulled in the 3D binder (CardFloatSystem /
+                // MotionUpdateSystem) — see RecentAdditions for the full story.
+                for item in stats.recent { RecentAdditions.shared.mark(cardID: item.card.id) }
+            }
             .onChange(of: stats.totalValue) { _, _ in animateValue() }
             .refreshable { await stats.refresh() }
         }
@@ -132,21 +144,61 @@ struct HomeView: View {
         } header: { sectionHeader("Most Valuable") }
     }
 
-    private var recentlyAdded: some View {
+    // MARK: Recent Pulls
+
+    /// card.id -> value, from the already-computed most-valuable list — so the
+    /// priciest card in the strip can get the shimmer treatment without a
+    /// second price lookup.
+    private var recentValueByCardID: [String: Double] {
+        Dictionary(stats.topValuable.map { ($0.card.id, $0.value) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    private var mostValuableRecentID: String? {
+        stats.recent.compactMap { item in recentValueByCardID[item.card.id].map { (item.card.id, $0) } }
+            .max { $0.1 < $1.1 }?.0
+    }
+
+    private var recentPullItems: [RevealItem] {
+        let values = recentValueByCardID
+        return stats.recent.map { item in
+            RevealItem(cardID: item.card.id, name: item.card.name,
+                      imageBase: item.card.imageBase, price: values[item.card.id])
+        }
+    }
+
+    /// A tappable replay strip of the most recent adds — one tap opens the
+    /// full RevealView "pack reveal" theater over the whole strip. The
+    /// priciest card in the strip gets a tiltShimmer sheen.
+    private var recentPulls: some View {
         Section {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(stats.recent) { item in
-                        NavigationLink(value: item.card) {
-                            CardImageView(cardID: item.card.id, imageBase: item.card.imageBase,
-                                          quality: .low, imageCache: env.imageCache)
-                                .frame(width: 80, height: 112)
+            Button {
+                Haptics.selection()
+                showingRecentPullsReplay = true
+            } label: {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(stats.recent) { item in
+                            Group {
+                                if item.card.id == mostValuableRecentID {
+                                    recentPullTile(item).tiltShimmer()
+                                } else {
+                                    recentPullTile(item)
+                                }
+                            }
                         }
-                        .buttonStyle(.pressable)
                     }
                 }
             }
-        } header: { sectionHeader("Recently Added") }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Recent pulls, tap to replay")
+        } header: { sectionHeader("Recent Pulls") }
+    }
+
+    private func recentPullTile(_ item: RecentCopy) -> some View {
+        CardImageView(cardID: item.card.id, imageBase: item.card.imageBase,
+                      quality: .low, imageCache: env.imageCache)
+            .frame(width: 64, height: 90)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var quickActions: some View {

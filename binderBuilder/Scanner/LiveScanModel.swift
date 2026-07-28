@@ -51,6 +51,11 @@ import UIKit
     private(set) var addedCount = 0
     private(set) var addedValue: Double = 0
     var lastActionText: String?
+    /// Cards added during this run, waiting to be turned over in the reveal.
+    /// One entry per add, so scanning the same card twice reveals it twice.
+    private(set) var revealQueue: [RevealItem] = []
+
+    var hasRevealQueue: Bool { !revealQueue.isEmpty }
 
     init(env: AppEnvironment) { self.env = env }
 
@@ -161,9 +166,17 @@ import UIKit
         locked = current
         addedCount += 1
         addedValue += current.price?.amount ?? 0
+        revealQueue.append(RevealItem(
+            cardID: current.card.id,
+            name: current.card.name,
+            imageBase: current.card.imageBase,
+            price: current.price?.amount))
         Haptics.success()
         announce("Added \(current.card.name) to \(destination.rawValue)")
     }
+
+    /// Drops the queue once the reveal has played (or been skipped).
+    func clearRevealQueue() { revealQueue.removeAll() }
 
     func addToWishlist() {
         guard let current = locked else { return }
