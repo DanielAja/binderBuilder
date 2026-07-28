@@ -3,7 +3,8 @@
 //  binderBuilderTests
 //
 //  Unit tests for the Scene3D math: CurlFunction (CPU twin of the
-//  PageCurl.metal geometry modifier) and CameraRig ray unprojection.
+//  PageCurl.metal geometry modifier), CameraRig ray unprojection, and the
+//  aspect-aware framing solve.
 //
 
 import CoreGraphics
@@ -193,5 +194,97 @@ struct CameraRayTests {
             )
             #expect(abs(simd_length(ray.direction) - 1) < 1e-5)
         }
+    }
+}
+
+@MainActor
+struct CameraFramingTests {
+    private let fov: Float = 55
+    /// iPhone SE-class portrait (wider frame than the tuning device).
+    private let seAspect: Float = 0.627
+    /// iPad portrait — much wider, and the worst case before this solve.
+    private let padAspect: Float = 0.81
+
+    /// World width visible at `distance` for a vertical `fov`.
+    private func visibleWidth(distance: Float, aspect: Float) -> Float {
+        2 * distance * tan(fov * .pi / 360) * aspect
+    }
+
+    private func distance(_ framing: CameraRig.Framing, aspect: Float) -> Float {
+        CameraRig.framingDistance(
+            subjectHalfWidth: framing.subjectHalfWidth,
+            tunedDistance: framing.tunedDistance,
+            aspect: aspect,
+            fovDegrees: fov
+        )
+    }
+
+    @Test func tuningAspectReproducesTheTunedDistance() {
+        // Regression anchor: the reference device's look must not move.
+        for framing in [CameraRig.Framing.binderOpen, .shelf] {
+            let solved = distance(framing, aspect: CameraRig.Framing.tunedAspect)
+            #expect(abs(solved - framing.tunedDistance) / framing.tunedDistance < 0.05)
+        }
+    }
+
+    @Test func binderNeverClipsAcrossPortraitAspects() {
+        let framing = CameraRig.Framing.binderOpen
+        let subject = 2 * framing.subjectHalfWidth
+        for aspect in [Float(0.40), 0.45, 0.50, 0.543, 0.627, 0.70, 0.81, 0.90] {
+            let width = visibleWidth(distance: distance(framing, aspect: aspect), aspect: aspect)
+            // Subject plus a margin on each side always fits.
+            #expect(width >= subject * (1 + CameraRig.marginFraction) - 1e-4)
+        }
+    }
+
+    @Test func sePortraitPullsInAndKeepsTheMargin() {
+        let framing = CameraRig.Framing.binderOpen
+        let solved = distance(framing, aspect: seAspect)
+        // Wider frame than the tuning device -> camera comes closer.
+        #expect(solved < framing.tunedDistance)
+        // ...but only as close as the margin allows: fill is the fixed ~93%.
+        let fill = 2 * framing.subjectHalfWidth / visibleWidth(distance: solved, aspect: seAspect)
+        #expect(abs(fill - 1 / (1 + CameraRig.marginFraction)) < 1e-3)
+    }
+
+    @Test func iPadPortraitFillsFarMoreOfTheFrame() {
+        let framing = CameraRig.Framing.binderOpen
+        let solved = distance(framing, aspect: padAspect)
+        // The floor of the clamp binds here (a free solve would come closer).
+        #expect(abs(solved - framing.tunedDistance * CameraRig.distanceClamp.lowerBound) < 1e-4)
+        let fill = 2 * framing.subjectHalfWidth / visibleWidth(distance: solved, aspect: padAspect)
+        let tunedFill = 2 * framing.subjectHalfWidth
+            / visibleWidth(distance: framing.tunedDistance, aspect: padAspect)
+        #expect(tunedFill < 0.70) // the bug: binder stranded mid-screen
+        #expect(fill > 0.80)
+    }
+
+    @Test func shelfKeepsTheDisplayCasesOnScreen() {
+        let framing = CameraRig.Framing.shelf
+        // Outer edge of the outer display case (slot at 0.34, case 0.09 wide).
+        let contentHalfWidth: Float = 0.385
+        for aspect in [Float(0.45), 0.543, seAspect, padAspect] {
+            let width = visibleWidth(distance: distance(framing, aspect: aspect), aspect: aspect)
+            #expect(width / 2 > contentHalfWidth)
+        }
+        // And the shelf comes closer on wider frames, as the binder does.
+        #expect(distance(framing, aspect: padAspect) < distance(framing, aspect: seAspect))
+        #expect(distance(framing, aspect: seAspect) < framing.tunedDistance)
+    }
+
+    @Test func extremeAspectsHitTheClamps() {
+        let framing = CameraRig.Framing.binderOpen
+        let tuned = framing.tunedDistance
+        // Absurdly narrow: capped so the binder can't recede forever.
+        #expect(abs(distance(framing, aspect: 0.2) - tuned * CameraRig.distanceClamp.upperBound) < 1e-4)
+        // Landscape: floored so the camera can't dive into the geometry.
+        #expect(abs(distance(framing, aspect: 2.16) - tuned * CameraRig.distanceClamp.lowerBound) < 1e-4)
+    }
+
+    @Test func distanceVariesInverselyWithAspectInsideTheClamps() {
+        let framing = CameraRig.Framing.shelf
+        let wide = distance(framing, aspect: 0.7)
+        let narrow = distance(framing, aspect: 0.35)
+        #expect(abs(narrow - 2 * wide) < 1e-3)
     }
 }

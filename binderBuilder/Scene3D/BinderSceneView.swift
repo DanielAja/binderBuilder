@@ -73,6 +73,12 @@ struct BinderSceneView: View {
                 content.camera = .virtual
                 content.add(model.result.root)
             }
+            // Framings are solved for the live viewport aspect: snap on first
+            // layout, dolly on later changes (rotation, iPad multitasking).
+            .onAppear { model.result.cameraRig.setViewport(proxy.size, animated: false) }
+            .onChange(of: proxy.size) { _, size in
+                model.result.cameraRig.setViewport(size, animated: true)
+            }
             .gesture(
                 // >0 minimum so a tap never starts a drag; the tap gesture owns
                 // open/pull-out/return. Shelf: drag orbits the camera. Binder:
