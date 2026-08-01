@@ -259,6 +259,7 @@ private struct TradeItemEditorView: View {
                                       quality: .low, imageCache: env.imageCache)
                             .id(summary?.imageBase)
                             .frame(width: 44, height: 61)
+                            .interactiveCard(card: summary, variant: item.ref.variant, intensity: 0.6)
                         Text(summary?.name ?? item.ref.fallbackName).font(.headline)
                     }
                 }

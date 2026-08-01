@@ -45,7 +45,10 @@ struct CardDetailView: View {
                     owned: owned, imageCache: env.imageCache
                 )
                 .containerRelativeFrame(.vertical) { h, _ in min(h * 0.45, 480) }
-                .hoverCard()
+                // Foil follows the variant picker: the reverse printing of a
+                // Common is a different card in the hand, so it should be a
+                // different card here too.
+                .interactiveCard(card: card, variant: variant)
                 .shadow(radius: 12, y: 6)
                 .padding(.top, 8)
 

@@ -309,6 +309,10 @@ private struct ResultCard: View {
                           quality: .low, imageCache: env.imageCache)
                 .frame(width: 62, height: 86)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                // Foil comes from the printing's rarity, NOT from the price
+                // chip beside it — a cheap hyper rare still has gold foil, and
+                // a pricey vintage Common still doesn't shimmer.
+                .interactiveCard(card: locked.card, variant: locked.variant, intensity: 0.5)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(locked.card.name).font(.headline).lineLimit(1)

@@ -137,24 +137,38 @@ extension View {
     /// Lays a motion-driven angular sheen over this view: as the device tilts,
     /// the highlight rotates across the art, the way light travels over a foil
     /// card. Under Reduce Motion the same gradient is applied statically.
-    func tiltShimmer() -> some View {
-        modifier(TiltShimmerModifier())
+    ///
+    /// - Parameters:
+    ///   - strength: scales the highlight's opacity. 0 skips the overlay (and
+    ///     the motion subscription) entirely.
+    ///   - tint: highlight color — warm gold for the gold foil tiers, plain
+    ///     white everywhere else.
+    func tiltShimmer(strength: Double = 1, tint: Color = .white) -> some View {
+        modifier(TiltShimmerModifier(strength: strength, tint: tint))
     }
 }
 
 private struct TiltShimmerModifier: ViewModifier {
+    var strength: Double = 1
+    var tint: Color = .white
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var subscribed = false
 
     /// Two highlights per revolution, wrapping to the same stop at both ends
     /// so the gradient has no seam.
-    private static let stops = Gradient(colors: [
-        .clear,
-        .white.opacity(0.34),
-        .clear,
-        .white.opacity(0.14),
-        .clear,
-    ])
+    private var stops: Gradient {
+        Gradient(colors: [
+            .clear,
+            tint.opacity(0.34 * strength),
+            .clear,
+            tint.opacity(0.14 * strength),
+            .clear,
+        ])
+    }
+
+    /// Whether the overlay contributes anything worth a 30 Hz subscription.
+    private var active: Bool { strength > 0 }
 
     private var angle: Angle {
         guard !reduceMotion else { return .degrees(-38) }
@@ -165,14 +179,17 @@ private struct TiltShimmerModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .overlay {
-                AngularGradient(gradient: Self.stops, center: .center, angle: angle)
-                    .blendMode(.plusLighter)
-                    .mask { content }
-                    .allowsHitTesting(false)
+                if active {
+                    AngularGradient(gradient: stops, center: .center, angle: angle)
+                        .blendMode(.plusLighter)
+                        .mask { content }
+                        .allowsHitTesting(false)
+                }
             }
-            .onAppear { setSubscribed(!reduceMotion) }
+            .onAppear { setSubscribed(active && !reduceMotion) }
             .onDisappear { setSubscribed(false) }
-            .onChange(of: reduceMotion) { _, reduced in setSubscribed(!reduced) }
+            .onChange(of: reduceMotion) { _, reduced in setSubscribed(active && !reduced) }
+            .onChange(of: active) { _, on in setSubscribed(on && !reduceMotion) }
     }
 
     /// Keeps this view's contribution to the source's ref count at exactly 0

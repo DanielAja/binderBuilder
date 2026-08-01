@@ -73,7 +73,8 @@ struct ConventionView: View {
                 CardPickerView(env: env, title: "Add to For-Trade") { card in addListing(card) }
             }
             .sheet(item: $editingListing, onDismiss: reload) { listing in
-                TradeListingEditorView(env: env, listing: listing, market: market[listing.ref])
+                TradeListingEditorView(env: env, listing: listing,
+                                       summary: summaries[listing.ref.cardID], market: market[listing.ref])
             }
             .sheet(isPresented: $addingWant) {
                 CardPickerView(env: env, title: "Add a Want") { card in addWant(card) }
@@ -393,12 +394,14 @@ private struct TradeSummaryRow: View {
 
 private struct TradeListingEditorView: View {
     let env: AppEnvironment
+    let summary: CardSummary?
     let market: Double?
     @Environment(\.dismiss) private var dismiss
     @State private var listing: TradeListing
 
-    init(env: AppEnvironment, listing: TradeListing, market: Double?) {
+    init(env: AppEnvironment, listing: TradeListing, summary: CardSummary?, market: Double?) {
         self.env = env
+        self.summary = summary
         self.market = market
         _listing = State(initialValue: listing)
     }
@@ -406,6 +409,16 @@ private struct TradeListingEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    HStack {
+                        CardImageView(cardID: listing.ref.cardID, imageBase: summary?.imageBase,
+                                      quality: .low, imageCache: env.imageCache)
+                            .id(summary?.imageBase)
+                            .frame(width: 44, height: 61)
+                            .interactiveCard(card: summary, variant: listing.ref.variant, intensity: 0.6)
+                        Text(summary?.name ?? listing.ref.fallbackName).font(.headline)
+                    }
+                }
                 Picker("Condition", selection: $listing.condition) {
                     ForEach(CardCondition.allCases, id: \.self) { Text($0.displayName).tag($0) }
                 }
@@ -452,6 +465,7 @@ private struct WantTargetEditorView: View {
                                       quality: .low, imageCache: env.imageCache)
                             .id(summary?.imageBase)
                             .frame(width: 44, height: 61)
+                            .interactiveCard(card: summary, variant: ref.variant, intensity: 0.6)
                         Text(summary?.name ?? ref.fallbackName).font(.headline)
                     }
                 }

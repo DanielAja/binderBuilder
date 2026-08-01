@@ -20,11 +20,29 @@ import SwiftUI
 
 extension View {
     /// Wraps this view in a slow 3D "hover": idle sway plus a touch tilt.
-    /// - Parameter intensity: scales every rotation/bob amplitude; 0 disables
-    ///   the idle motion outright (touch-tilt still responds).
-    func hoverCard(intensity: Double = 1) -> some View {
-        modifier(HoverCardModifier(intensity: intensity))
+    /// - Parameters:
+    ///   - intensity: scales every rotation/bob amplitude; 0 disables the idle
+    ///     motion outright (touch-tilt still responds).
+    ///   - onDrag: observes the touch-tilt so a caller can layer feedback on it
+    ///     (see `interactiveCard`). The tilt itself is applied either way.
+    func hoverCard(
+        intensity: Double = 1,
+        onDrag: ((HoverCardDragEvent) -> Void)? = nil
+    ) -> some View {
+        modifier(HoverCardModifier(intensity: intensity, onDrag: onDrag))
     }
+}
+
+/// A phase of the touch-tilt drag, reported to `hoverCard(intensity:onDrag:)`.
+/// Angles are the tilt actually applied to the card, in the same convention as
+/// the `rotation3DEffect` calls below (x = pitch, y = yaw).
+enum HoverCardDragEvent {
+    /// Finger went down; carries the tilt it snapped to.
+    case began(x: Angle, y: Angle)
+    /// Finger moved; carries the new tilt.
+    case changed(x: Angle, y: Angle)
+    /// Finger lifted; the card is springing back to the idle sway.
+    case ended
 }
 
 /// Pure sway math, factored out of the view so it can be unit tested without
@@ -60,6 +78,7 @@ enum HoverCardMath {
 
 private struct HoverCardModifier: ViewModifier {
     let intensity: Double
+    let onDrag: ((HoverCardDragEvent) -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -120,13 +139,19 @@ private struct HoverCardModifier: ViewModifier {
                 let ny = ((value.location.y / size.height) - 0.5) * 2
                 let clampedX = min(max(nx, -1), 1)
                 let clampedY = min(max(ny, -1), 1)
-                dragTilt = (
-                    x: .degrees(-clampedY * Self.maxDragTilt),
-                    y: .degrees(clampedX * Self.maxDragTilt)
+                let tilt = (
+                    x: Angle.degrees(-clampedY * Self.maxDragTilt),
+                    y: Angle.degrees(clampedX * Self.maxDragTilt)
                 )
+                // The first `onChanged` of a drag is the touch-down.
+                onDrag?(dragTilt == nil
+                        ? .began(x: tilt.x, y: tilt.y)
+                        : .changed(x: tilt.x, y: tilt.y))
+                dragTilt = tilt
             }
             .onEnded { _ in
                 withAnimation(Self.dragSpring) { dragTilt = nil }
+                onDrag?(.ended)
             }
     }
 }

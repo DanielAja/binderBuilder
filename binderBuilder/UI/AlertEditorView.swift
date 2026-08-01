@@ -16,6 +16,9 @@ struct AlertEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var kind: AlertKind = .belowTarget
     @State private var thresholdText = ""
+    /// Header art only; nil until the catalog lookup lands (or forever, for a
+    /// ref the catalog no longer knows).
+    @State private var summary: CardSummary?
     @FocusState private var thresholdFieldFocused: Bool
 
     private var existing: PriceAlert? { env.alerts.alert(for: ref) }
@@ -23,6 +26,16 @@ struct AlertEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    HStack {
+                        CardImageView(cardID: ref.cardID, imageBase: summary?.imageBase,
+                                      quality: .low, imageCache: env.imageCache)
+                            .id(summary?.imageBase)
+                            .frame(width: 44, height: 61)
+                            .interactiveCard(card: summary, variant: ref.variant, intensity: 0.6)
+                        Text(summary?.name ?? ref.fallbackName).font(.headline)
+                    }
+                }
                 Section {
                     Picker("Alert when", selection: $kind) {
                         Text("Drops below price").tag(AlertKind.belowTarget)
@@ -66,6 +79,7 @@ struct AlertEditorView: View {
                     thresholdText = String(existing.threshold)
                 }
             }
+            .task { summary = try? await env.catalog?.card(id: ref.cardID)?.summary }
         }
     }
 
