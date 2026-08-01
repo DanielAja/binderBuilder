@@ -52,6 +52,11 @@ final class AppEnvironment {
         return made
     }
 
+    /// Bumped whenever the open binder's card content is re-snapshotted.
+    /// RootTabView keys the Binder tab on it, so the scene is rebuilt from the
+    /// fresh snapshot the next time that tab's body is evaluated.
+    private(set) var sceneGeneration = 0
+
     init() {
         let catalogDB = GRDBCatalogDatabase.bundled()
         catalog = catalogDB
@@ -126,6 +131,16 @@ final class AppEnvironment {
         }
         isReady = true
         if let launchWarning { errors.show(launchWarning) }
+    }
+
+    /// Re-snapshots the open binder and drops the cached scene, so the Binder
+    /// tab rebuilds its 3D content with the binder's new card order. A no-op
+    /// unless `binderID` is the binder currently rendered in 3D.
+    func refreshOpenBinder(_ binderID: String) async {
+        guard binderID == openBinderID else { return }
+        content = await BinderCardContentBuilder.build(binderID: binderID, store: binders)
+        _scene = nil
+        sceneGeneration += 1
     }
 
     /// Runs the price-drop + new-release alert checks (on app activation /

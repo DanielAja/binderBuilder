@@ -2,15 +2,23 @@
 //  BinderManagerView.swift
 //  binderBuilder
 //
-//  Create, rename, and delete binders, and a quick collection summary. (The
-//  3D scene renders the first binder; choosing which binder to open in 3D is a
-//  later enhancement.)
+//  Create, rename, sort, export, and delete binders, and a quick collection
+//  summary. (The 3D scene renders the first binder; choosing which binder to
+//  open in 3D is a later enhancement.)
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct BinderManagerView: View {
     let env: AppEnvironment
+
+    /// A sort waiting on its confirmation dialog.
+    private struct PendingSort: Identifiable {
+        let binder: Binder
+        let key: BinderSortKey
+        var id: String { "\(binder.id)|\(key.rawValue)" }
+    }
 
     @State private var showingCreate = false
     @State private var newName = ""
@@ -18,6 +26,17 @@ struct BinderManagerView: View {
     @State private var renameText = ""
     @State private var showingScan = false
     @State private var pendingDelete: Binder?
+    @State private var pendingSort: PendingSort?
+    /// True while a sort's database rewrite + 3D re-snapshot is in flight.
+    @State private var sorting = false
+    /// 0...1 while an export renders; nil when idle.
+    @State private var exportProgress: Double?
+    @State private var pdfDocument: BinderPDFDocument?
+    @State private var exportingPDF = false
+    @State private var pdfFilename = "binder"
+    @State private var pngShare: BinderPNGShare?
+
+    private var busy: Bool { sorting || exportProgress != nil }
 
     var body: some View {
         List {
@@ -44,14 +63,26 @@ struct BinderManagerView: View {
                     }
                     .contextMenu {
                         Button("Rename") { renaming = binder; renameText = binder.name }
+                        Menu("Sort by") {
+                            ForEach(BinderSortKey.allCases) { key in
+                                Button(key.title) { pendingSort = PendingSort(binder: binder, key: key) }
+                            }
+                        }
+                        Menu("Export") {
+                            Button("PDF") { export(binder, as: .pdf) }
+                            Button("PNGs") { export(binder, as: .pngs) }
+                        }
                         Button("Delete", role: .destructive) { pendingDelete = binder }
                     }
+                    .accessibilityHint("Touch and hold for rename, sort, export, and delete")
                 }
                 .onDelete { offsets in
                     if let index = offsets.first { pendingDelete = env.binders.binders[index] }
                 }
             }
         }
+        .disabled(busy)
+        .overlay { busyOverlay }
         .confirmationDialog("Delete binder?",
                             isPresented: Binding(get: { pendingDelete != nil },
                                                  set: { if !$0 { pendingDelete = nil } }),
@@ -64,11 +95,26 @@ struct BinderManagerView: View {
         } message: {
             Text("This removes the binder and its card placements. Your owned cards stay in your collection.")
         }
+        .confirmationDialog("Sort by \(pendingSort?.key.title ?? "")?",
+                            isPresented: Binding(get: { pendingSort != nil },
+                                                 set: { if !$0 { pendingSort = nil } }),
+                            titleVisibility: .visible) {
+            Button("Sort \(pendingSort?.binder.name ?? "")") {
+                if let pending = pendingSort { runSort(pending) }
+                pendingSort = nil
+            }
+            Button("Cancel", role: .cancel) { pendingSort = nil }
+        } message: {
+            Text("Every card is reordered and packed to the front, so the empty pockets end up at the back. This replaces the current arrangement.")
+        }
         .navigationTitle("Binders")
         .toolbar {
             Button { newName = ""; showingCreate = true } label: { Image(systemName: "plus") }
         }
         .sheet(isPresented: $showingScan) { ScanView(env: env) }
+        .sheet(item: $pngShare) { share in ExportShareSheet(urls: share.urls) }
+        .fileExporter(isPresented: $exportingPDF, document: pdfDocument,
+                      contentType: .pdf, defaultFilename: pdfFilename) { _ in }
         .alert("New binder", isPresented: $showingCreate) {
             TextField("Name", text: $newName)
             Button("Create") {
@@ -87,6 +133,74 @@ struct BinderManagerView: View {
                 renaming = nil
             }
             Button("Cancel", role: .cancel) { renaming = nil }
+        }
+    }
+
+    /// Covers the list while a sort or a (multi-second) export runs.
+    @ViewBuilder private var busyOverlay: some View {
+        if busy {
+            ZStack {
+                Color.black.opacity(0.25).ignoresSafeArea()
+                VStack(spacing: 12) {
+                    if let progress = exportProgress {
+                        ProgressView(value: progress)
+                            .frame(width: 180)
+                        Text("Rendering pages…")
+                    } else {
+                        ProgressView()
+                        Text("Sorting…")
+                    }
+                }
+                .font(.subheadline)
+                .padding(24)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(exportProgress != nil ? "Rendering pages" : "Sorting binder")
+        }
+    }
+
+    // MARK: - Actions
+
+    private func runSort(_ pending: PendingSort) {
+        sorting = true
+        Task {
+            defer { sorting = false }
+            guard await env.binders.sort(binderID: pending.binder.id, by: pending.key) else {
+                env.errors.show("Nothing to sort in \(pending.binder.name) yet.")
+                return
+            }
+            Haptics.success()
+            await env.refreshOpenBinder(pending.binder.id)
+            env.errors.show("Sorted \(pending.binder.name) by \(pending.key.title).", isError: false)
+        }
+    }
+
+    private func export(_ binder: Binder, as format: BinderExportFormat) {
+        exportProgress = 0
+        Task {
+            defer { exportProgress = nil }
+            let job = await BinderExport.prepare(
+                binder: binder, store: env.binders, cache: env.imageCache
+            ) { exportProgress = $0 }
+
+            guard !job.pages.isEmpty else {
+                env.errors.show("\(binder.name) has no cards to export yet.")
+                return
+            }
+            do {
+                switch format {
+                case .pdf:
+                    pdfDocument = BinderPDFDocument(data: BinderExport.pdfData(job))
+                    pdfFilename = BinderExport.fileStem(binder.name)
+                    exportingPDF = true
+                case .pngs:
+                    pngShare = BinderPNGShare(urls: try BinderExport.writePNGs(job))
+                }
+                Haptics.success()
+            } catch {
+                env.errors.show("Couldn't export \(binder.name): \(error.localizedDescription)")
+            }
         }
     }
 }

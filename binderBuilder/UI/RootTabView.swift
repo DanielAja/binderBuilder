@@ -51,7 +51,10 @@ struct RootTabView: View {
                 .tabItem { Label("Browse", systemImage: "magnifyingglass") }
                 .tag(RootTab.browse)
 
+            // Keyed on sceneGeneration: sorting the open binder re-snapshots
+            // its content, and the new identity rebuilds the scene from it.
             BinderSceneView(env: env)
+                .id(env.sceneGeneration)
                 .tabItem { Label("Binder", systemImage: "book.fill") }
                 .tag(RootTab.binder)
 

@@ -28,6 +28,10 @@ import os
     private(set) var binders: [Binder] = []
     /// The 3 shelf display-case slots.
     private(set) var displayCase: [CardRef?] = [nil, nil, nil]
+    /// Increments when a sort rewrites a binder's whole slot layout, so
+    /// observers know any order they are holding (e.g. the 3D snapshot) is
+    /// stale. Single-pocket assign/clear does not bump it.
+    private(set) var changeToken: Int = 0
 
     /// CardSummary lookups are cached for the life of the store (the catalog
     /// is immutable).
@@ -246,6 +250,92 @@ import os
             }
         } catch {
             Self.logger.error("clear failed: \(String(describing: error))")
+        }
+    }
+
+    // MARK: - Sorting
+
+    /// Reorders every card in `binderID` by `key` and lays them back down from
+    /// the first pocket forward. The sort COMPACTS (see BinderSort): gaps close
+    /// up and the empty pockets become one tail at the back. The binder's page
+    /// count is untouched, and rows outside its current page range — a leftover
+    /// from a binder that shrank — are left exactly where they are.
+    ///
+    /// The whole rewrite is one transaction; `changeToken` bumps on success.
+    /// Returns false when there is nothing to sort, or when the app is running
+    /// without a catalog (names, sets, rarities and prices all live there).
+    @discardableResult
+    func sort(binderID: String, by key: BinderSortKey) async -> Bool {
+        guard let binder = binders.first(where: { $0.id == binderID }),
+              binder.pageCount > 0,
+              let catalog
+        else { return false }
+
+        do {
+            let refs = try await database.queue.read { db -> [CardRef] in
+                let rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                    SELECT card_id, variant FROM slot_assignment
+                    WHERE binder_id = ? AND page_index < ? AND slot_index < ?
+                    ORDER BY page_index, side, slot_index
+                    """,
+                    arguments: [binderID, binder.pageCount, SpreadModel.slotsPerPage])
+                return rows.compactMap { row in
+                    guard let variant = CardVariant(rawValue: row["variant"] as String? ?? "") else { return nil }
+                    return CardRef(cardID: row["card_id"], variant: variant)
+                }
+            }
+            guard !refs.isEmpty else { return false }
+
+            let ordered = BinderSort.sorted(try await sortEntries(for: refs, catalog: catalog), by: key)
+            let slots = BinderSort.slotSequence(binderID: binderID, pageCount: binder.pageCount)
+            try await database.queue.write { db in
+                try db.execute(
+                    sql: "DELETE FROM slot_assignment WHERE binder_id = ? AND page_index < ? AND slot_index < ?",
+                    arguments: [binderID, binder.pageCount, SpreadModel.slotsPerPage])
+                for (entry, slot) in zip(ordered, slots) {
+                    try db.execute(
+                        sql: """
+                        INSERT INTO slot_assignment
+                          (binder_id, page_index, side, slot_index, card_id, variant)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        arguments: [slot.binderID, slot.pageIndex, slot.side.rawValue,
+                                    slot.slotIndex, entry.ref.cardID, entry.ref.variant.rawValue])
+                }
+            }
+            changeToken += 1
+            return true
+        } catch {
+            Self.logger.error("sort failed: \(String(describing: error))")
+            return false
+        }
+    }
+
+    /// Decorates the binder's pocket refs with the catalog metadata the
+    /// ordering needs, in three batched queries (summaries, sets, prices).
+    private func sortEntries(for refs: [CardRef], catalog: any CatalogReading) async throws -> [BinderSortEntry] {
+        let summaries = try await catalog.summaries(forCardIDs: Array(Set(refs.map(\.cardID))))
+        var summaryByID: [String: CardSummary] = [:]
+        for summary in summaries {
+            summaryByID[summary.id] = summary
+            summaryCache[summary.id] = summary
+        }
+        // allSets() already comes back in release order.
+        var releaseOrder: [String: Int] = [:]
+        for (index, set) in (try await catalog.allSets()).enumerated() { releaseOrder[set.id] = index }
+        let market = try await catalog.bundledMarket(for: refs)
+
+        return refs.map { ref in
+            let summary = summaryByID[ref.cardID]
+            return BinderSortEntry(
+                ref: ref,
+                name: summary?.name ?? ref.cardID,
+                setOrder: summary.flatMap { releaseOrder[$0.setID] } ?? Int.max,
+                localNumber: summary?.localNumber ?? "",
+                rarity: summary?.rarity,
+                market: market[ref])
         }
     }
 
