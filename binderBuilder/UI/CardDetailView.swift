@@ -45,6 +45,7 @@ struct CardDetailView: View {
                     owned: owned, imageCache: env.imageCache
                 )
                 .containerRelativeFrame(.vertical) { h, _ in min(h * 0.45, 480) }
+                .hoverCard()
                 .shadow(radius: 12, y: 6)
                 .padding(.top, 8)
 
