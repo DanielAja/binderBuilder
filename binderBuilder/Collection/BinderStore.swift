@@ -28,9 +28,11 @@ import os
     private(set) var binders: [Binder] = []
     /// The 3 shelf display-case slots.
     private(set) var displayCase: [CardRef?] = [nil, nil, nil]
-    /// Increments when a sort rewrites a binder's whole slot layout, so
-    /// observers know any order they are holding (e.g. the 3D snapshot) is
-    /// stale. Single-pocket assign/clear does not bump it.
+    /// Increments when a binder's slot layout is edited through a path that
+    /// expects observers to refresh: a sort's whole-binder rewrite, or a
+    /// single-pocket `setSlot`/`clearSlot` from the 3D pocket editor. The
+    /// quiet bulk writers (`assign`/`clear`) do not bump it — seeding and
+    /// scan commits re-snapshot on their own.
     private(set) var changeToken: Int = 0
 
     /// CardSummary lookups are cached for the life of the store (the catalog
@@ -217,10 +219,15 @@ import os
 
     // MARK: - Slot assignment
 
-    func assign(_ ref: CardRef, to slot: SlotLocation) {
+    /// Quiet bulk placement (seeding, scan commits, "add to binder"): writes the
+    /// pocket without bumping `changeToken`, because those paths re-snapshot the
+    /// binder themselves. Returns false when the write failed or the slot
+    /// address was out of range.
+    @discardableResult
+    func assign(_ ref: CardRef, to slot: SlotLocation) -> Bool {
         guard (0..<SpreadModel.slotsPerPage).contains(slot.slotIndex), slot.pageIndex >= 0 else {
             Self.logger.error("assign: invalid slot index \(slot.slotIndex) / page \(slot.pageIndex)")
-            return
+            return false
         }
         do {
             try database.queue.write { db in
@@ -233,12 +240,15 @@ import os
                     arguments: [slot.binderID, slot.pageIndex, slot.side.rawValue,
                                 slot.slotIndex, ref.cardID, ref.variant.rawValue])
             }
+            return true
         } catch {
             Self.logger.error("assign failed: \(String(describing: error))")
+            return false
         }
     }
 
-    func clear(slot: SlotLocation) {
+    @discardableResult
+    func clear(slot: SlotLocation) -> Bool {
         do {
             try database.queue.write { db in
                 try db.execute(
@@ -248,9 +258,34 @@ import os
                     """,
                     arguments: [slot.binderID, slot.pageIndex, slot.side.rawValue, slot.slotIndex])
             }
+            return true
         } catch {
             Self.logger.error("clear failed: \(String(describing: error))")
+            return false
         }
+    }
+
+    // MARK: - Single-pocket edits (from the 3D binder's pocket editor)
+
+    /// Puts `ref` in one pocket, replacing whatever was there, in a single
+    /// transaction, and bumps `changeToken` so observers holding a layout (the
+    /// 3D snapshot) know it is stale. Duplicates are allowed on purpose —
+    /// collectors legitimately own several copies of the same printing.
+    /// Returns false when the write failed (the caller should surface that).
+    @discardableResult
+    func setSlot(_ ref: CardRef, at slot: SlotLocation) -> Bool {
+        guard assign(ref, to: slot) else { return false }
+        changeToken += 1
+        return true
+    }
+
+    /// Empties one pocket in a single transaction and bumps `changeToken`.
+    /// Clearing an already-empty pocket succeeds (it is idempotent).
+    @discardableResult
+    func clearSlot(_ slot: SlotLocation) -> Bool {
+        guard clear(slot: slot) else { return false }
+        changeToken += 1
+        return true
     }
 
     // MARK: - Sorting

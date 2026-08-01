@@ -38,16 +38,20 @@ final class AppEnvironment {
     /// fell back to a temporary store), surfaced once the UI is up.
     @ObservationIgnored private var launchWarning: String?
 
-    /// The binder currently rendered in 3D and its prepared card content.
+    /// The binder currently rendered in 3D, and its prepared card content. The
+    /// content is a live holder (see LiveBinderCardContent): the running scene
+    /// reads through it, so a single-pocket edit can refresh it in place
+    /// instead of forcing a scene rebuild.
     private(set) var openBinderID: String?
-    private(set) var content: BinderCardContent?
+    let content = LiveBinderCardContent()
     private(set) var isReady = false
 
     /// The 3D scene, built once and reused across tab switches.
     @ObservationIgnored private var _scene: SceneModel?
     var scene: SceneModel {
         if let _scene { return _scene }
-        let made = SceneModel(content: content, textureCache: textureCache)
+        let made = SceneModel(
+            content: content.sheetCount > 0 ? content : nil, textureCache: textureCache)
         _scene = made
         return made
     }
@@ -122,8 +126,8 @@ final class AppEnvironment {
             return
         }
         openBinderID = binder.id
-        content = await BinderCardContentBuilder.build(binderID: binder.id, store: binders)
-        Self.log.info("Prepared binder \(binder.id, privacy: .public) with \(self.content?.sheetCount ?? 0, privacy: .public) sheets")
+        content.replace(with: await BinderCardContentBuilder.build(binderID: binder.id, store: binders))
+        Self.log.info("Prepared binder \(binder.id, privacy: .public) with \(self.content.sheetCount, privacy: .public) sheets")
         // Seed the "known sets" baseline so new-release alerts only fire for
         // sets released after this catalog build.
         if userDatabase.knownSetIDs().isEmpty, let sets = try? await catalog?.allSets() {
@@ -136,11 +140,27 @@ final class AppEnvironment {
     /// Re-snapshots the open binder and drops the cached scene, so the Binder
     /// tab rebuilds its 3D content with the binder's new card order. A no-op
     /// unless `binderID` is the binder currently rendered in 3D.
+    ///
+    /// Use this for whole-binder changes (a sort). A single pocket edit should
+    /// use `reloadOpenBinderContent` instead — rebuilding the scene also resets
+    /// the camera and the open spread, which is far too much for one card.
     func refreshOpenBinder(_ binderID: String) async {
         guard binderID == openBinderID else { return }
-        content = await BinderCardContentBuilder.build(binderID: binderID, store: binders)
+        await reloadOpenBinderContent(binderID)
         _scene = nil
         sceneGeneration += 1
+    }
+
+    /// Re-snapshots the open binder IN PLACE: the live content holder picks up
+    /// the new pockets, but the scene is left standing. Callers rebind the page
+    /// pool afterwards so the change shows immediately while the camera, the
+    /// open spread and any on-screen mode all survive. Returns false when
+    /// `binderID` isn't the binder currently rendered in 3D.
+    @discardableResult
+    func reloadOpenBinderContent(_ binderID: String) async -> Bool {
+        guard binderID == openBinderID else { return false }
+        content.replace(with: await BinderCardContentBuilder.build(binderID: binderID, store: binders))
+        return true
     }
 
     /// Runs the price-drop + new-release alert checks (on app activation /

@@ -67,6 +67,64 @@ import Testing
         #expect(try assignmentCount(stores.user) == 0)
     }
 
+    // MARK: - Single-pocket edits (the 3D pocket editor)
+
+    @Test func setSlotAndClearSlotRoundTripAndBumpTheChangeToken() async throws {
+        let stores = try makeStores()
+        let binder = try #require(stores.binders.createBinder(name: "Edit", coverColor: "#1B6CA8"))
+        let slot = SlotLocation(binderID: binder.id, pageIndex: 0, side: .back, slotIndex: 5)
+        #expect(stores.binders.changeToken == 0)
+
+        #expect(stores.binders.setSlot(CardRef(cardID: "base1-4", variant: .holo), at: slot))
+        #expect(stores.binders.changeToken == 1)
+        var spread = try await stores.binders.spread(1, in: binder.id)
+        #expect(spread.left[5]?.card.id == "base1-4")
+        #expect(spread.left[5]?.variant == .holo)
+
+        // Replacing a pocket swaps its card in place, it does not stack up.
+        #expect(stores.binders.setSlot(CardRef(cardID: "base1-58", variant: .normal), at: slot))
+        #expect(stores.binders.changeToken == 2)
+        #expect(try assignmentCount(stores.user) == 1)
+        spread = try await stores.binders.spread(1, in: binder.id)
+        #expect(spread.left[5]?.card.id == "base1-58")
+
+        #expect(stores.binders.clearSlot(slot))
+        #expect(stores.binders.changeToken == 3)
+        #expect(try assignmentCount(stores.user) == 0)
+        spread = try await stores.binders.spread(1, in: binder.id)
+        #expect(spread.left[5] == nil)
+    }
+
+    /// Collectors own multiples, so the same printing may sit in several
+    /// pockets of one binder. Nothing dedupes it.
+    @Test func setSlotAllowsTheSameCardInSeveralPockets() async throws {
+        let stores = try makeStores()
+        let binder = try #require(stores.binders.createBinder(name: "Dupes", coverColor: "#D2042D"))
+        let ref = CardRef(cardID: "base1-4", variant: .holo)
+
+        #expect(stores.binders.setSlot(ref, at: SlotLocation(
+            binderID: binder.id, pageIndex: 0, side: .front, slotIndex: 0)))
+        #expect(stores.binders.setSlot(ref, at: SlotLocation(
+            binderID: binder.id, pageIndex: 0, side: .front, slotIndex: 8)))
+
+        #expect(try assignmentCount(stores.user) == 2)
+        let spread = try await stores.binders.spread(0, in: binder.id)
+        #expect(spread.right[0]?.card.id == "base1-4")
+        #expect(spread.right[8]?.card.id == "base1-4")
+    }
+
+    /// A rejected address must not look like a successful edit, or the caller
+    /// would re-snapshot and bump for nothing.
+    @Test func setSlotRejectsAnOutOfRangeAddressWithoutBumping() throws {
+        let stores = try makeStores()
+        let binder = try #require(stores.binders.createBinder(name: "Bad", coverColor: "#000000"))
+        #expect(!stores.binders.setSlot(
+            CardRef(cardID: "base1-4", variant: .holo),
+            at: SlotLocation(binderID: binder.id, pageIndex: 0, side: .front, slotIndex: 9)))
+        #expect(stores.binders.changeToken == 0)
+        #expect(try assignmentCount(stores.user) == 0)
+    }
+
     @Test func ownedFlagComesFromTheInjectedClosure() async throws {
         let stores = try makeStores()
         let binder = try #require(stores.binders.createBinder(name: "Owned", coverColor: "#000000"))
