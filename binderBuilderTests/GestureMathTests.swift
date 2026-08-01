@@ -43,6 +43,19 @@ struct DragMappingTests {
         #expect(GestureMath.progressVelocity(velocityX: 480, span: span) == -2)
     }
 
+    @Test func progressTracksTheFingerOneToOne() {
+        // No easing, smoothing or lerp on the drag path: equal finger travel
+        // must always buy equal progress, or the page lags the touch.
+        var previous = GestureMath.dragProgress(translationX: 0, span: span, startT: 0)
+        for step in 1...8 {
+            let t = GestureMath.dragProgress(
+                translationX: -CGFloat(step) * 30, span: span, startT: 0
+            )
+            #expect(abs((t - previous) - Float(30 / span)) < 1e-6)
+            previous = t
+        }
+    }
+
     @Test func spanIsAFractionOfTheViewport() {
         #expect(GestureMath.span(viewportWidth: 400) == 400 * GestureMath.spanFraction)
         #expect(GestureMath.span(viewportWidth: 0) == 1) // never divides by zero
@@ -50,6 +63,8 @@ struct DragMappingTests {
 }
 
 struct ReleaseTargetTests {
+    private let threshold = GestureMath.flickThreshold(span: GestureMath.referenceSpan)
+
     @Test func slowReleasesFallToTheNearerSide() {
         #expect(GestureMath.releaseTarget(t: 0.49, velocity: 0) == 0)
         #expect(GestureMath.releaseTarget(t: 0.51, velocity: 0) == 1)
@@ -63,9 +78,44 @@ struct ReleaseTargetTests {
         // Mostly-flipped page + hard rightward flick: snaps back.
         #expect(GestureMath.releaseTarget(t: 0.85, velocity: -2.5) == 0)
         // Exactly at threshold counts as a flick.
-        #expect(GestureMath.releaseTarget(t: 0.1, velocity: GestureMath.flickThreshold) == 1)
-        // Just under threshold does not.
-        #expect(GestureMath.releaseTarget(t: 0.1, velocity: GestureMath.flickThreshold - 0.01) == 0)
+        #expect(GestureMath.releaseTarget(t: 0.1, velocity: threshold) == 1)
+        // Just under threshold does not (and does not project that far either).
+        #expect(GestureMath.releaseTarget(t: 0.1, velocity: threshold - 0.01) == 0)
+    }
+
+    @Test func subFlickReleasesFollowTheVelocityTheyStillCarry() {
+        // Released just short of the midpoint but still travelling forward:
+        // the page commits to where it was heading, not to where it was.
+        #expect(GestureMath.releaseTarget(t: 0.45, velocity: 1.0) == 1)
+        // ...and symmetrically, drifting back past the midpoint gives up.
+        #expect(GestureMath.releaseTarget(t: 0.55, velocity: -1.0) == 0)
+        // A dead-stop release still just falls to the nearer side.
+        #expect(GestureMath.releaseTarget(t: 0.45, velocity: 0) == 0)
+        #expect(GestureMath.releaseTarget(t: 0.55, velocity: 0) == 1)
+        // Projection is bounded: a crawl cannot carry the page over.
+        #expect(GestureMath.releaseTarget(t: 0.3, velocity: 0.6) == 0)
+    }
+
+    @Test func flickThresholdTracksPhysicalFingerSpeedNotScreenWidth() {
+        // The same hand speed (points/s) must flick on any device. A 700 pt/s
+        // release flicks on a narrow phone and on a wide iPad alike; 300 pt/s
+        // flicks on neither.
+        for viewportWidth in [320.0, 440.0, 834.0, 1366.0] as [CGFloat] {
+            let span = GestureMath.span(viewportWidth: viewportWidth)
+            let threshold = GestureMath.flickThreshold(span: span)
+            let fast = GestureMath.progressVelocity(velocityX: -700, span: span)
+            let slow = GestureMath.progressVelocity(velocityX: -300, span: span)
+            #expect(fast >= threshold, "700 pt/s should flick at width \(viewportWidth)")
+            #expect(slow < threshold, "300 pt/s should not flick at width \(viewportWidth)")
+            #expect(GestureMath.releaseTarget(t: 0.1, velocity: fast, flickThreshold: threshold) == 1)
+        }
+    }
+
+    @Test func flickThresholdMatchesTheLegacyPhoneTuning() {
+        // The physical speed is the old span-relative 1.8 t/s, preserved so
+        // phone feel is unchanged by the normalization.
+        let threshold = GestureMath.flickThreshold(span: GestureMath.referenceSpan)
+        #expect(abs(threshold - 1.8) < 1e-5)
     }
 }
 

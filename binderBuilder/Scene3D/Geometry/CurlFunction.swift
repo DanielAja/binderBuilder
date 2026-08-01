@@ -19,12 +19,15 @@
 //  (x' > pi*r) continues flat, upside down, heading back toward the spine.
 //
 //  Full flip parameterization (progress t in 0...1):
-//    phase A (t in [0, 0.5]):   d slides from pageWidth to 0 at constant r —
-//                               the page curls up and over the spine.
-//    phase B (t in (0.5, 1]):   d == 0 and r shrinks toward `restRadius`, so
-//                               the page settles flat (mirrored, x -> -x) on
+//    phase A (t in [0, phaseSplit]): d slides from pageWidth to 0 at constant
+//                               r — the page curls up and over the spine.
+//    phase B (t in (phaseSplit, 1]): d == 0 and r shrinks toward `restRadius`,
+//                               so the page settles flat (mirrored, x -> -x) on
 //                               the LEFT stack. t == 0 is flat-on-right,
 //                               t == 1 is flat-on-left.
+//  The split and the phase-A easing are chosen so the free edge sweeps its
+//  arc at a near-constant rate in t (see `phaseSplit`) — under a linear drag
+//  the page must not lurch and then crawl.
 //
 //  Sag: heavy pages droop. A parabolic bell over the material x coordinate
 //  (zero at the spine and at the free edge, max in the middle) pulls lifted
@@ -56,6 +59,20 @@ nonisolated struct CurlParams: Equatable, Sendable {
     /// Cylinder radius when a flipped page rests flat on the left stack.
     static let restRadius: Float = 0.0015
 
+    /// Progress at which the curl hands off from phase A (fold line sliding to
+    /// the spine) to phase B (cylinder collapsing onto the left stack).
+    ///
+    /// Phase A carries ~71% of the free edge's total travel, so splitting at
+    /// 0.5 made the page sweep ~3x faster before the midpoint than after it —
+    /// a visible lurch-then-crawl under an even drag. Splitting where the arc
+    /// actually splits gives both phases the same speed.
+    static let phaseSplit: Float = 0.72
+    /// Easing on the phase-A fold-line slide. The free edge is stationary at
+    /// t = 0 (nothing has lifted yet), so a linear slide wastes the first
+    /// tenth of the drag; a sub-linear exponent moves the fold line quickly
+    /// off the mark so the page answers the finger immediately.
+    static let phaseAEase: Float = 0.75
+
     init(d: Float, r: Float, psi: Float, sag: Float = 0, sway: Float = 0) {
         self.d = d
         self.r = r
@@ -69,6 +86,11 @@ nonisolated struct CurlParams: Equatable, Sendable {
     /// progress 1 is flat (mirrored) on the left. psi follows a gentle
     /// sin(pi*t) arc so both endpoints are perfectly flat; gesture/drag psi
     /// is added on top by PageTurnSystem.
+    ///
+    /// The mapping is shaped so equal steps in progress move the page by
+    /// roughly equal amounts on screen (see `phaseSplit` / `phaseAEase`):
+    /// progress tracks the finger, so any nonlinearity here reads as lag or
+    /// as the page running ahead of the touch.
     static func progress(
         _ value: Float,
         pageWidth: Float = PageMesh.width,
@@ -78,10 +100,11 @@ nonisolated struct CurlParams: Equatable, Sendable {
     ) -> CurlParams {
         let c = min(max(value, 0), 1)
         let psi = maxPsi * sin(.pi * c)
-        if c <= 0.5 {
-            return CurlParams(d: (1 - 2 * c) * pageWidth, r: radius, psi: psi)
+        if c <= phaseSplit {
+            let slide = pow(c / phaseSplit, phaseAEase)
+            return CurlParams(d: (1 - slide) * pageWidth, r: radius, psi: psi)
         }
-        let k = (c - 0.5) / 0.5
+        let k = (c - phaseSplit) / (1 - phaseSplit)
         return CurlParams(d: 0, r: radius + (restRadius - radius) * k, psi: psi)
     }
 

@@ -601,11 +601,19 @@ final class BinderFlipController {
 
     /// Releases the drag: springs to 0 or 1 (position + flick), with the
     /// spring slowed by the sheet's occupancy (omega = omega0/sqrt(mass)).
-    func endDrag(t: Float, velocity: Float) {
+    /// The spring starts at the live gesture velocity, so the page carries
+    /// the hand's momentum instead of restarting from a standstill.
+    /// `flickThreshold` comes from the caller's span so "a flick" means the
+    /// same physical hand speed on every device.
+    func endDrag(
+        t: Float,
+        velocity: Float,
+        flickThreshold: Float = GestureMath.flickThreshold(span: GestureMath.referenceSpan)
+    ) {
         defer { activeDragIndex = nil }
         guard let index = activeDragIndex,
               var component = pages[index].entity.components[PageComponent.self] else { return }
-        let target = GestureMath.releaseTarget(t: t, velocity: velocity)
+        let target = GestureMath.releaseTarget(t: t, velocity: velocity, flickThreshold: flickThreshold)
         let clamped = min(max(velocity, -GestureMath.maxSpringVelocity), GestureMath.maxSpringVelocity)
         component.phase = .springing(FlipSpring(
             t: t,
@@ -628,7 +636,7 @@ final class BinderFlipController {
 
     /// -autoFlip: one scripted forward flip driven through the exact gesture
     /// path a finger would take — a drag ramp to t = 0.6 over ~0.8 s, then
-    /// the standard occupancy-weighted release spring (~0.9 s). The slow
+    /// the standard occupancy-weighted release spring (~0.6 s). The slow
     /// linear ramp keeps the page visibly airborne for most of the flight,
     /// which makes the screenshot timing robust against launch jitter.
     func startAutoFlip() {

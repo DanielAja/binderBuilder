@@ -46,10 +46,17 @@ nonisolated struct FlipSpring: Equatable, Sendable {
 /// Occupancy-aware flip dynamics. A pocketful of cards makes a page heavier:
 /// its release spring slows by 1/sqrt(massFactor) and it sags more mid-flip.
 nonisolated enum PageDynamics {
-    /// Natural frequency of an EMPTY page's release spring (rad/s).
-    static let omega0: Float = 10
+    /// Natural frequency of an EMPTY page's release spring (rad/s). The
+    /// perceived duration of a critically-damped spring is its response,
+    /// 2*pi/omega: 14 rad/s lands at ~0.45 s, which reads as a decisive
+    /// release that still settles rather than snaps. (10 rad/s — 0.63 s —
+    /// left a sluggish tail after the page was visually done moving.)
+    static let omega0: Float = 14
     /// Sag droop per occupied pocket (m); 18 pockets ~ 1.26 cm mid-flip.
     static let sagPerSlot: Float = 0.0007
+    /// Droop (m) a sheet has even when empty. A perfectly rigid plane reads
+    /// as cardboard; a couple of millimetres of bow mid-flip reads as paper.
+    static let baseSag: Float = 0.002
 
     /// massFactor = 1 + 0.08 * occupied pockets on BOTH sides of the sheet.
     static func massFactor(occupiedSlots: Int) -> Float {
@@ -64,7 +71,7 @@ nonisolated enum PageDynamics {
     /// page is rigid at both rest poses and droops most mid-flip, scaled by
     /// how many pockets it carries. Clamped to the packable maximum.
     static func sag(occupiedSlots: Int, t: Float) -> Float {
-        let amplitude = min(CurlParams.maxSag, sagPerSlot * Float(max(0, occupiedSlots)))
+        let amplitude = min(CurlParams.maxSag, baseSag + sagPerSlot * Float(max(0, occupiedSlots)))
         return amplitude * max(0, sin(.pi * min(max(t, 0), 1)))
     }
 }
@@ -72,7 +79,7 @@ nonisolated enum PageDynamics {
 /// Curl state machine for one pooled page entity. PageTurnSystem advances
 /// springs, decays gesture psi, computes sag, and applies the resulting
 /// CurlParams through the page's deformer every frame.
-struct PageComponent: Component {
+struct PageComponent: Component, Equatable {
     nonisolated enum Phase: Equatable, Sendable {
         /// Lying flat (t == 0 right / t == 1 left), or frozen via -curl.
         case rest(t: Float)

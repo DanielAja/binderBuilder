@@ -85,10 +85,30 @@ struct PageDynamicsTests {
         #expect(PageDynamics.sag(occupiedSlots: 18, t: 0) == 0)
         #expect(abs(PageDynamics.sag(occupiedSlots: 18, t: 1)) < 1e-6)
         let mid = PageDynamics.sag(occupiedSlots: 18, t: 0.5)
-        #expect(abs(mid - min(CurlParams.maxSag, 18 * PageDynamics.sagPerSlot)) < 1e-6)
-        #expect(PageDynamics.sag(occupiedSlots: 0, t: 0.5) == 0)
+        let expected = min(CurlParams.maxSag, PageDynamics.baseSag + 18 * PageDynamics.sagPerSlot)
+        #expect(abs(mid - expected) < 1e-6)
         // More cards, more droop.
         #expect(PageDynamics.sag(occupiedSlots: 12, t: 0.5) > PageDynamics.sag(occupiedSlots: 3, t: 0.5))
+    }
+
+    @Test func evenAnEmptySheetBowsMidFlip() {
+        // A sheet with no cards is still paper, not cardboard: it bows a
+        // little in flight and lies perfectly flat at both rest poses.
+        #expect(PageDynamics.sag(occupiedSlots: 0, t: 0.5) == PageDynamics.baseSag)
+        #expect(PageDynamics.sag(occupiedSlots: 0, t: 0) == 0)
+        #expect(abs(PageDynamics.sag(occupiedSlots: 0, t: 1)) < 1e-6)
+        // Small enough to read as paper rather than as a droop.
+        #expect(PageDynamics.baseSag < CurlParams.maxSag / 5)
+    }
+
+    @Test func releaseSpringRespondsInAboutHalfASecond() {
+        // Perceived duration of a critically-damped spring is its response,
+        // 2*pi/omega. This is the tuning: decisive, but not a snap.
+        let response = 2 * Float.pi / PageDynamics.omega0
+        #expect(response > 0.4 && response < 0.5)
+        // A full sheet is heavier, but must not feel sluggish.
+        let loaded = 2 * Float.pi / PageDynamics.omega(occupiedSlots: 18)
+        #expect(loaded < 0.75)
     }
 }
 
@@ -208,13 +228,57 @@ struct FlipProgressTests {
 
     @Test func phaseAMovesCurlTowardSpineAtConstantRadius() {
         var lastD = Float.greatestFiniteMagnitude
-        for c in stride(from: Float(0), through: 0.5, by: 0.05) {
+        for c in stride(from: Float(0), through: CurlParams.phaseSplit, by: 0.05) {
             let p = CurlParams.progress(c)
             #expect(p.d <= lastD)
             #expect(abs(p.r - 0.05) < 1e-6)
             lastD = p.d
         }
-        #expect(CurlParams.progress(0.5).d < 1e-6)
+        // The fold line reaches the spine exactly at the phase boundary, and
+        // phase B (which only shrinks the radius) owns the rest.
+        #expect(CurlParams.progress(CurlParams.phaseSplit).d < 1e-6)
+        #expect(CurlParams.progress(0.99).d == 0)
+        // Phase A owns the majority of progress because it owns the majority
+        // of the free edge's travel; see `curlAdvancesAtAnEvenRate`.
+        #expect(CurlParams.phaseSplit > 0.6 && CurlParams.phaseSplit < 0.85)
+    }
+
+    /// Distance the free edge of the page has travelled at a given progress.
+    private static func freeEdge(_ t: Float) -> SIMD3<Float> {
+        CurlFunction.deform(
+            position: SIMD3<Float>(PageMesh.width, PageMesh.height / 2, 0),
+            normal: SIMD3<Float>(0, 0, 1),
+            params: CurlParams.progress(t)
+        ).position
+    }
+
+    @Test func curlAdvancesAtAnEvenRate() {
+        // Progress tracks the finger 1:1, so equal steps in progress have to
+        // move the page by roughly equal amounts on screen. (A 0.5 phase
+        // split made the page sweep ~3x faster before the midpoint than
+        // after it — a lurch, then a crawl.)
+        let buckets = 20
+        var steps: [Float] = []
+        var previous = Self.freeEdge(0)
+        for i in 1...buckets {
+            let point = Self.freeEdge(Float(i) / Float(buckets))
+            steps.append(simd_length(point - previous))
+            previous = point
+        }
+        let mean = steps.reduce(0, +) / Float(steps.count)
+
+        // The free edge is genuinely stationary at t = 0 (nothing has lifted
+        // off the stack yet), so only the opening bucket may lag the mean.
+        for (index, step) in steps.enumerated().dropFirst() {
+            #expect(step > 0.55 * mean, "bucket \(index) stalls: \(step / mean) of mean")
+            #expect(step < 1.45 * mean, "bucket \(index) races: \(step / mean) of mean")
+        }
+        // ...and no bucket may be wildly faster than the one before it: that
+        // discontinuity is what reads as a jump mid-flip.
+        for index in 1..<steps.count {
+            let ratio = max(steps[index] / steps[index - 1], steps[index - 1] / steps[index])
+            #expect(ratio < 2, "jump at bucket \(index): \(ratio)x")
+        }
     }
 }
 

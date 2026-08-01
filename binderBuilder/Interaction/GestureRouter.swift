@@ -21,13 +21,32 @@ nonisolated enum GestureMath {
     static let spanFraction: CGFloat = 0.55
     /// Maximum curl-axis tilt from grabbing a page corner (~25 degrees).
     static let maxGesturePsi: Float = 0.4363
-    /// Release velocities (t-units/s) above this count as a flick.
-    static let flickThreshold: Float = 1.8
-    /// Clamp on the spring's initial velocity (t-units/s).
+    /// Physical finger speed (points/s) at or above which a release is a
+    /// flick. Progress velocity is span-relative, so a fixed t-units/s
+    /// threshold would mean "flick" at a different real-world hand speed on
+    /// every screen size — easy on a phone, nearly unreachable on an iPad.
+    /// The number is the old 1.8 t/s expressed at `referenceSpan`, so phone
+    /// feel is unchanged and every other device now matches it.
+    static let flickPointsPerSecond: CGFloat = 432
+    /// The span the t-unit constants were originally tuned against
+    /// (a ~436 pt viewport).
+    static let referenceSpan: CGFloat = 240
+    /// Clamp on the spring's initial velocity (t-units/s). Bounds how short
+    /// the release animation can get, however hard the flick.
     static let maxSpringVelocity: Float = 6
+    /// How far ahead (s) a sub-flick release's velocity is projected when
+    /// picking the resting end, so a page that is still travelling commits to
+    /// where it was heading instead of to where the finger happened to lift.
+    static let releaseProjection: Float = 0.12
 
     static func span(viewportWidth: CGFloat) -> CGFloat {
         max(1, viewportWidth * spanFraction)
+    }
+
+    /// Flick threshold in t-units/s for a given span — the span-relative
+    /// speed that corresponds to `flickPointsPerSecond` of finger travel.
+    static func flickThreshold(span: CGFloat) -> Float {
+        Float(flickPointsPerSecond / max(1, span))
     }
 
     /// Maps the drag's x translation to curl progress. Dragging LEFT (toward
@@ -45,16 +64,19 @@ nonisolated enum GestureMath {
     }
 
     /// Where the page springs on release: a flick wins regardless of
-    /// position; otherwise the page falls to the nearer rest pose.
+    /// position; otherwise the page falls to the nearer rest pose *as
+    /// projected forward by its release velocity*, so a page released just
+    /// short of the midpoint but still moving over keeps going instead of
+    /// reversing under the finger.
     static func releaseTarget(
         t: Float,
         velocity: Float,
-        flickThreshold: Float = GestureMath.flickThreshold
+        flickThreshold: Float = GestureMath.flickThreshold(span: GestureMath.referenceSpan)
     ) -> Float {
         if abs(velocity) >= flickThreshold {
             return velocity > 0 ? 1 : 0
         }
-        return t > 0.5 ? 1 : 0
+        return t + velocity * releaseProjection > 0.5 ? 1 : 0
     }
 
     /// Curl-axis tilt from where the page was grabbed along its height:
@@ -116,7 +138,11 @@ final class GestureRouter {
         case idle
         /// Touch landed somewhere unflippable — swallow the rest of the drag.
         case rejected
-        case tracking(direction: FlipDirection, startT: Float, psi: Float, span: CGFloat)
+        /// `slopX` is the translation already accumulated when the gesture
+        /// recognized (DragGesture's minimumDistance). Subtracting it keeps
+        /// the page glued to the finger: without it the page jumps by the
+        /// recognizer's slop the instant the drag is handed to us.
+        case tracking(direction: FlipDirection, startT: Float, psi: Float, span: CGFloat, slopX: CGFloat)
     }
 
     private let controller: BinderFlipController
@@ -132,22 +158,28 @@ final class GestureRouter {
 
     func dragChanged(location: CGPoint, startLocation: CGPoint, translation: CGSize, viewport: CGSize) {
         if case .idle = state {
-            begin(at: startLocation, viewport: viewport)
+            begin(at: startLocation, slopX: translation.width, viewport: viewport)
         }
-        guard case .tracking(_, let startT, let psi, let span) = state else { return }
-        let t = GestureMath.dragProgress(translationX: translation.width, span: span, startT: startT)
+        guard case .tracking(_, let startT, let psi, let span, let slopX) = state else { return }
+        let t = GestureMath.dragProgress(
+            translationX: translation.width - slopX, span: span, startT: startT
+        )
         controller.updateDrag(t: t, psi: psi)
     }
 
     func dragEnded(translation: CGSize, velocity: CGSize, viewport: CGSize) {
         defer { state = .idle }
-        guard case .tracking(_, let startT, _, let span) = state else { return }
-        let t = GestureMath.dragProgress(translationX: translation.width, span: span, startT: startT)
+        guard case .tracking(_, let startT, _, let span, let slopX) = state else { return }
+        let t = GestureMath.dragProgress(
+            translationX: translation.width - slopX, span: span, startT: startT
+        )
         let velocityT = GestureMath.progressVelocity(velocityX: velocity.width, span: span)
-        controller.endDrag(t: t, velocity: velocityT)
+        controller.endDrag(
+            t: t, velocity: velocityT, flickThreshold: GestureMath.flickThreshold(span: span)
+        )
     }
 
-    private func begin(at point: CGPoint, viewport: CGSize) {
+    private func begin(at point: CGPoint, slopX: CGFloat, viewport: CGSize) {
         guard viewport.width > 0, viewport.height > 0 else {
             state = .rejected
             return
@@ -181,7 +213,8 @@ final class GestureRouter {
             direction: direction,
             startT: startT,
             psi: psi,
-            span: GestureMath.span(viewportWidth: viewport.width)
+            span: GestureMath.span(viewportWidth: viewport.width),
+            slopX: slopX
         )
     }
 }

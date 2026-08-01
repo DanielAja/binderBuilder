@@ -32,8 +32,11 @@ final class PageTurnSystem: System {
     /// Called once per completed flip, after the frame's query iteration.
     static var onFlipSettled: ((Entity, PageComponent) -> Void)?
 
-    /// Exponential decay rate for gesture psi while springing (1/s).
-    static let psiDecayRate: Float = 6
+    /// Exponential decay rate for gesture psi while springing (1/s). Paced to
+    /// the release spring (PageDynamics.omega0) so the grabbed corner has
+    /// straightened out by the time the page lands — otherwise the residual
+    /// tilt is snapped away at settle.
+    static let psiDecayRate: Float = 8
     /// Cap on total curl-axis tilt (radians).
     static let maxTotalPsi: Float = 0.6
 
@@ -56,6 +59,7 @@ final class PageTurnSystem: System {
 
         for entity in context.entities(matching: Self.query, updatingSystemWhen: .rendering) {
             guard var page = entity.components[PageComponent.self] else { continue }
+            let unchanged = page
 
             switch page.phase {
             case .rest, .dragging:
@@ -72,7 +76,10 @@ final class PageTurnSystem: System {
                 }
             }
 
-            let t = page.currentT
+            // A flick's spring can carry t a little past its target; clamp
+            // before it reaches the geometry so an overshoot never drags the
+            // page back down off its stack.
+            let t = min(max(page.currentT, 0), 1)
             var params = CurlParams.progress(t)
             params.psi = min(max(params.psi + page.gesturePsi, -Self.maxTotalPsi), Self.maxTotalPsi)
             params.sag = PageDynamics.sag(occupiedSlots: page.occupiedBothSides, t: t)
@@ -88,7 +95,11 @@ final class PageTurnSystem: System {
             if abs(entity.position.y - y) > 1e-6 {
                 entity.position.y = y
             }
-            entity.components.set(page)
+            // Resting pages cost nothing: a component write per page per frame
+            // is pure overhead once the flip has settled.
+            if page != unchanged {
+                entity.components.set(page)
+            }
         }
 
         for (entity, page) in settled {
