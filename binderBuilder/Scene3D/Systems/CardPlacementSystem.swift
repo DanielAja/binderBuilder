@@ -146,7 +146,8 @@ final class CardPlacement {
     private func spawn(_ render: CardSlotRender, slot: Int, side: PageSide, on page: ModelEntity) {
         let initial = textures.cached(render.ref) ?? textures.placeholder
         guard let card = CardFactory.makeCard(
-            ref: render.ref, slot: slot, side: side, owned: render.owned, texture: initial
+            ref: render.ref, slot: slot, side: side, owned: render.owned,
+            texture: initial, foil: render.foil
         ) else { return }
         if textures.cached(render.ref) != nil {
             if var comp = card.components[CardSlotComponent.self] { comp.hasArt = true; card.components.set(comp) }
@@ -161,7 +162,10 @@ final class CardPlacement {
             guard let texture = try? await textures.load(render.ref, imageBase: render.imageBase, pinned: render.owned),
                   let card, var comp = card.components[CardSlotComponent.self], comp.ref == render.ref
             else { return }
-            CardFactory.updateFront(card, texture: texture, variant: render.ref.variant, owned: render.owned)
+            CardFactory.updateFront(
+                card, texture: texture, variant: render.ref.variant, owned: render.owned,
+                foil: render.foil, artBoxEra: FoilTier.artBoxEra(cardID: render.ref.cardID)
+            )
             comp.hasArt = true
             card.components.set(comp)
         }

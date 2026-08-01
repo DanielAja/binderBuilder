@@ -20,6 +20,19 @@ nonisolated struct CardSlotRender: Equatable, Sendable {
     var imageBase: String?
     /// Unowned cards render grayscale (a shader uniform), owned in full color.
     var owned: Bool
+    /// Raw TCGdex rarity string from the catalog; nil when unknown. Keys the
+    /// foil effect together with `ref.variant` (see FoilTier).
+    var rarity: String?
+
+    init(ref: CardRef, imageBase: String?, owned: Bool, rarity: String? = nil) {
+        self.ref = ref
+        self.imageBase = imageBase
+        self.owned = owned
+        self.rarity = rarity
+    }
+
+    /// Which shader foil branch this printing gets.
+    var foil: FoilTier { FoilTier.resolve(rarity: rarity, variant: ref.variant) }
 }
 
 /// One physical sheet's pockets: 9 front + 9 back, slot-major, nil = empty.
@@ -109,19 +122,27 @@ nonisolated struct DebugCardContentSource: CardContentProviding {
 
     init(sheetCount: Int = 10) {
         self.sheetCount = sheetCount
-        // Real base-set IDs + image bases (TCGdex "en/<serie>/<set>/<localId>").
-        let ids: [(String, String)] = [
-            ("base1-4", "en/base/base1/4"),     // Charizard
-            ("base1-2", "en/base/base1/2"),     // Blastoise
-            ("base1-15", "en/base/base1/15"),   // Venusaur
-            ("base1-58", "en/base/base1/58"),   // Pikachu
-            ("base1-10", "en/base/base1/10"),   // Mewtwo
-            ("base1-16", "en/base/base1/16"),   // Zapdos
-            ("base1-7", "en/base/base1/7"),     // Hitmonchan
-            ("base1-13", "en/base/base1/13"),   // Ninetales
-            ("base1-1", "en/base/base1/1"),     // Alakazam
+        // Real TCGdex IDs + image bases ("en/<serie>/<set>/<localId>"), one per
+        // foil tier so a single debug spread exercises every shader branch.
+        let ids: [(String, String, String?, CardVariant)] = [
+            ("base1-4", "en/base/base1/4", "Rare", .holo),                            // holoArt
+            ("base1-58", "en/base/base1/58", "Common", .reverse),                     // reverseInverse
+            ("swsh12-139", "en/swsh/swsh12/139", "Holo Rare VSTAR", .holo),           // fullArtEtched
+            ("sv02-196", "en/sv/sv02/196", "Illustration rare", .holo),               // illustrationRare
+            ("sv04-245", "en/sv/sv04/245", "Special illustration rare", .holo),       // SIR
+            ("swsh4-198", "en/swsh/swsh4/198", "Secret Rare", .holo),                 // secretRainbow
+            ("sv03-229", "en/sv/sv03/229", "Hyper rare", .holo),                      // goldHyper
+            ("me02-130", "en/me/me02/130", "Mega Hyper Rare", .holo),                 // megaHyperGold
+            ("base1-46", "en/base/base1/46", "Common", .normal),                      // none
         ]
-        cards = ids.map { CardSlotRender(ref: CardRef(cardID: $0.0, variant: .holo), imageBase: $0.1, owned: true) }
+        cards = ids.map {
+            CardSlotRender(
+                ref: CardRef(cardID: $0.0, variant: $0.3),
+                imageBase: $0.1,
+                owned: true,
+                rarity: $0.2
+            )
+        }
     }
 
     func snapshot(sheet: Int) -> SheetCardSnapshot {
@@ -137,7 +158,9 @@ nonisolated struct DebugCardContentSource: CardContentProviding {
         }
         // And some back slots so the left page of the next spread has content.
         for slot in 0..<min((sheet % 4) + 2, 9) {
-            var card = cards[(slot + 3) % cards.count]
+            // Offset by 4 so front (0...5) and back (4...8) between them touch
+            // every card — i.e. every foil tier — across the debug sheets.
+            var card = cards[(slot + 4) % cards.count]
             card.owned = !owned
             snap.back[slot] = card
         }

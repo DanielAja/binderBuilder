@@ -21,4 +21,7 @@ struct CardSlotComponent: Component {
     var lastParams: CurlParams?
     /// True once the real art (not the placeholder) has been bound.
     var hasArt: Bool = false
+    /// Which CardSurface foil branch this printing renders with — resolved
+    /// once from rarity + variant at spawn (FoilTier.resolve).
+    var foil: FoilTier = .none
 }

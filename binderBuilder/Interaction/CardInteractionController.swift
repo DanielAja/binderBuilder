@@ -72,10 +72,27 @@ final class CardInteractionController {
         }
     }
 
+    /// Sends the floating card home, if one is out. Used when the binder enters
+    /// pocket-edit mode: there a tap means "edit this pocket", so nothing may be
+    /// left hovering in front of the camera.
+    func returnFloatingCard() {
+        guard isFloating else { return }
+        returnCard()
+    }
+
     /// Auto-pull a specific card (debug / -uiState cardFloating), optionally
     /// settling it at a yaw so the foil shows at an angle in screenshots.
     func pullOutFirstAvailable(yawDegrees: Float? = nil) {
-        guard let card = collectCards().first else { return }
+        // Prefer the flashiest foil on the bound pages — a verification shot of
+        // a floating card should show the foil work, not whichever common
+        // happened to be first in the entity tree. Ties keep tree order.
+        let cards = collectCards()
+        let best = cards.max { a, b in
+            let ta = a.components[CardSlotComponent.self]?.foil.rawValue ?? 0
+            let tb = b.components[CardSlotComponent.self]?.foil.rawValue ?? 0
+            return ta < tb
+        }
+        guard let card = best ?? cards.first else { return }
         pullOut(card)
         // Debug only: zero the foil so text is legible in verification shots.
         if DebugLaunchState.launchFlag("-noHolo"),

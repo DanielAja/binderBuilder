@@ -59,7 +59,8 @@ enum BinderCardContentBuilder {
         return CardSlotRender(
             ref: CardRef(cardID: content.card.id, variant: content.variant),
             imageBase: content.card.imageBase,
-            owned: content.owned
+            owned: content.owned,
+            rarity: content.card.rarity
         )
     }
 }
