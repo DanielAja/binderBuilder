@@ -31,13 +31,17 @@ final class MotionUpdateSystem: System {
     static let tiltGain: Float = 0.6
     /// Ambient drift so foils shimmer even when the device is still (cycles/s).
     static let driftRate: Float = 0.04
-    /// Period / duration / strength of the occasional shimmer sweep on the
-    /// floating ("main") card.
+    /// Period / duration / size of the occasional shimmer sweep on the
+    /// floating ("main") card. NB `shimmerAmount` is measured in *hue cycles*
+    /// added to `lightPhase.x`, not in brightness: a sweep races the foil's
+    /// hue across the card, it does not turn the foil up. Brightness is owned
+    /// entirely by `holoStrength` and the cap in CardSurface.metal.
     nonisolated static let shimmerPeriod: Float = 4.5
     nonisolated static let shimmerDuration: Float = 0.9
     nonisolated static let shimmerAmount: Float = 2.4
-    /// Amplitude multiplier for the one-shot "first touch" glint bump played
-    /// when a `CardFloatComponent.firstTouchGlint`-flagged card first floats.
+    /// How much further the one-shot "first touch" glint sweeps the hue,
+    /// relative to the ambient shimmer, when a
+    /// `CardFloatComponent.firstTouchGlint`-flagged card first floats.
     nonisolated static let firstFloatGlintMultiplier: Float = 1.8
 
     private var elapsed: Float = 0

@@ -35,6 +35,13 @@ static inline float bb_card_luminance(float3 c)
     return dot(c, float3(0.2126f, 0.7152f, 0.0722f));
 }
 
+/// Hard ceiling on the additive foil term. The holo is folded into the
+/// *base color* (albedo), which the lighting integrator then multiplies by the
+/// scene illuminance — so an unbounded term does not "glow", it multiplies.
+/// Capping it keeps albedo physical (<= 1 after the add) and guarantees the
+/// card art stays readable no matter how hot the rig or how strong the foil.
+constant float bb_holo_cap = 0.42f;
+
 [[visible]]
 void cardSurface(realitykit::surface_parameters params)
 {
@@ -79,10 +86,15 @@ void cardSurface(realitykit::surface_parameters params)
     // gated (boosted) by fresnel.
     const float2 cell = floor(uv * float2(190.0f, 265.0f));
     const float glint = bb_card_hash(cell + floor(lightPhase * 23.0f));
-    const float sparkle = step(0.992f, glint) * (0.35f + fresnel) * 2.0f;
+    const float sparkle = step(0.992f, glint) * (0.35f + fresnel) * 1.1f;
 
-    const float3 holo = (rainbow * iridescence * 0.65f + float3(sparkle)) * (mask * holoStrength);
-    color += holo;
+    // Capped per channel: a full-strength foil at a grazing angle tops out at
+    // bb_holo_cap of extra albedo instead of running away to 2.7 (which read
+    // as a flat yellow-white flood over the art).
+    const float3 holo = min((rainbow * iridescence * 0.65f + float3(sparkle)) * (mask * holoStrength),
+                            float3(bb_holo_cap));
+    // saturate(): albedo must stay <= 1 or the lighting pass amplifies it.
+    color = saturate(color + holo);
 
     // Grayscale LAST so unowned cards desaturate the full composite.
     color = mix(color, float3(bb_card_luminance(color)), grayscaleAmount);

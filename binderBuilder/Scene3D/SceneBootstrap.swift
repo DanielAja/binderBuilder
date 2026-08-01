@@ -74,18 +74,31 @@ enum SceneBootstrap {
         let cameraRig = CameraRig()
         root.addChild(cameraRig.root)
 
+        // Exposure budget. The three lights below sum to roughly this much
+        // illuminance on an up-facing surface at the origin (the open page).
+        // A near-white page (albedo ~0.8) has to land just under clipping, so
+        // the total has to stay near "1 unit of white" — the previous rig ran
+        // ~3x over that, which clipped the page to pure #FFFFFF and clipped
+        // saturated card art channel-by-channel (a 255/209/77 "yellow-white"
+        // bleach instead of orange). Keep the ratios; scale the whole rig.
+        let keyLux: Float = 2150
+        let fillLumens: Float = 5000
+        let ambientLux: Float = 900
+
         // Warm key from upper-right.
         let key = DirectionalLight()
         key.name = "KeyLight"
-        key.light.intensity = 6500
+        key.light.intensity = keyLux
         key.light.color = .init(red: 1.0, green: 0.96, blue: 0.90, alpha: 1)
         key.look(at: .zero, from: SIMD3<Float>(0.55, 1.4, 0.75), relativeTo: nil)
         root.addChild(key)
 
-        // Cool fill from the left.
+        // Cool fill from the left. Point lights fall off as 1/d², so this is
+        // also what over-lit the *floating* card specifically: it springs to
+        // 0.26 m in front of the camera, far closer to the fill than the page.
         let fill = PointLight()
         fill.name = "FillLight"
-        fill.light.intensity = 16000
+        fill.light.intensity = fillLumens
         fill.light.attenuationRadius = 7
         fill.light.color = .init(red: 0.86, green: 0.91, blue: 1.0, alpha: 1)
         fill.position = SIMD3<Float>(-0.5, 0.6, 0.5)
@@ -95,7 +108,7 @@ enum SceneBootstrap {
         // (RealityKit has no ambient light; a dim wide directional stands in).
         let ambient = DirectionalLight()
         ambient.name = "AmbientLift"
-        ambient.light.intensity = 2600
+        ambient.light.intensity = ambientLux
         ambient.light.color = .init(red: 0.95, green: 0.95, blue: 1.0, alpha: 1)
         ambient.look(at: .zero, from: SIMD3<Float>(-0.2, 0.7, 1.0), relativeTo: nil)
         root.addChild(ambient)
@@ -248,12 +261,15 @@ enum SceneBootstrap {
         }
 
         for row in 0..<height {
-            let shade = 0.90 + 0.06 * CGFloat(row) / CGFloat(height)
+            // Paper albedo, not paper *brightness*: real sheet stock is ~0.85,
+            // and anything near 1.0 clips to a featureless #FFFFFF under any
+            // reasonable key light, which is what buried the page shading.
+            let shade = 0.84 + 0.05 * CGFloat(row) / CGFloat(height)
             context.setFillColor(CGColor(red: shade, green: shade, blue: shade * 0.99, alpha: 1))
             context.fill(CGRect(x: 0, y: row, width: width, height: 1))
         }
         // Thin darker rim.
-        context.setStrokeColor(CGColor(red: 0.72, green: 0.72, blue: 0.73, alpha: 1))
+        context.setStrokeColor(CGColor(red: 0.66, green: 0.66, blue: 0.67, alpha: 1))
         context.setLineWidth(3)
         context.stroke(CGRect(x: 1.5, y: 1.5, width: CGFloat(width) - 3, height: CGFloat(height) - 3))
 
