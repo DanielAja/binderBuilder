@@ -227,6 +227,9 @@ void cardSurface(realitykit::surface_parameters params)
     // texture mask stopped zeroing this term.
     float3 accent = float3(0.0f);
     float roughness = 0.42f;
+    // White broadband reflectance. Right for a print under a clear laminate,
+    // which is every tier but one — see the mega note below.
+    float specular = 0.50f;
 
     if (tier == BB_TIER_HOLO_ART) {
         // Classic holo: cosmos dot-field confined to the art window.
@@ -311,8 +314,30 @@ void cardSurface(realitykit::surface_parameters params)
         roughness = 0.32f;
     } else if (tier == BB_TIER_GOLD || tier == BB_TIER_MEGA_GOLD) {
         // Gold tiers: the same rotating bands, saturation collapsed into the
-        // amber range, plus a strong fresnel catch. Mega goes fully
-        // monochrome and doubles the sparkle density.
+        // amber range, plus a strong fresnel catch. Mega stays fully
+        // monochrome and sparkles finer and denser.
+        //
+        // MEGA IS BUDGETED SEPARATELY, and not because it wants to be quieter.
+        // It is the one tier whose PRINT is already gold: me02-130 measures a
+        // mean sRGB of (0.90, 0.74, 0.05), a gold-on-gold face whose artwork is
+        // carried entirely by shallow relief. Two things then break under the
+        // goldHyper numbers, which is why that tier can wear them and this one
+        // cannot:
+        //
+        //   * `accent` is added to LINEAR albedo. This print's blue sits at
+        //     ~0.004 linear, so a broad gold term of ~0.2 re-encodes to a blue
+        //     of ~0.45 for display — a 100x lift that turns amber into pale
+        //     yellow all by itself.
+        //   * its red is already ~0.78 linear, so the same add clips. Measured
+        //     on the reported screenshot: 90% of the card's pixels sat at
+        //     R > 0.98 and luminance contrast fell from the print's 0.119 to
+        //     0.074.
+        //
+        // Clipped highlights over a floor lifted 100x is precisely the reported
+        // "flat yellow with a ghost silhouette". So mega keeps its identity in
+        // PATTERN — monochrome gold, finer/denser sparkle, warm fresnel — and
+        // holds its BROAD terms to the documented <= 0.10, scaled further by
+        // whatever headroom the print itself leaves.
         const bool mega = (tier == BB_TIER_MEGA_GOLD);
         const float band = bb_band_coord(uv, lightPhase);
         const float ridge = 0.18f + 0.82f
@@ -321,12 +346,35 @@ void cardSurface(realitykit::surface_parameters params)
         const float3 hueTint = mega
             ? bb_gold
             : mix(bb_gold, bb_card_hue_ramp(fract(0.09f + 0.10f * sin(band * 6.0f + lightPhase.x))), 0.30f);
-        const float2 density = mega ? float2(46.0f, 64.0f) : float2(30.0f, 42.0f);
-        const float grain = bb_spark(uv, density, mega ? 0.30f : 0.26f, lightPhase, 0.80f);
-        accent = saturate(hueTint * ridge * (0.085f + 0.185f * fresnel)
-                          + bb_gold * grain * (mega ? 0.34f : 0.26f)
-                          + bb_gold * rim * 0.12f * fresnel);
+        // Denser than goldHyper, but with tighter cores: at pocket size a wide
+        // core stops resolving as flecks and just averages into another broad
+        // wash, which is the other half of why mega read flat in the binder.
+        const float2 density = mega ? float2(58.0f, 80.0f) : float2(30.0f, 42.0f);
+        const float grain = bb_spark(uv, density, mega ? 0.20f : 0.26f, lightPhase, 0.80f);
+        // Room left before the add clips: 1 on dark art, ~0.35 on a gold face.
+        // Broad terms only — sparkle CORES are supposed to reach white, that is
+        // what makes a fleck a fleck.
+        const float headroom = mega ? saturate(1.0f - bb_card_luminance(color)) : 1.0f;
+        const float broadAmp = mega ? (0.035f + 0.075f * fresnel)
+                                    : (0.085f + 0.185f * fresnel);
+        accent = saturate(hueTint * ridge * broadAmp * headroom
+                          + bb_gold * grain * (mega ? 0.30f : 0.26f)
+                          + bb_gold * rim * (mega ? 0.10f : 0.12f) * fresnel * headroom);
         roughness = mega ? 0.28f : 0.30f;
+        if (mega) {
+            // The other half of the bleaching, and the half no accent budget
+            // could have reached: a 0.5 WHITE specular over an already-gold
+            // print. Every other tier has a colourful print underneath, so a
+            // white environment reflection just reads as gloss; on gold-on-gold
+            // it is a broad white veil laid over the one hue the card has, and
+            // it measured bigger than the foil term itself (zeroing the whole
+            // mega accent moved the card's contrast by 0.006, dropping this to
+            // 0.22 moved it by 0.014 and pulled blue down from 0.47 to 0.36).
+            // Gold leaf reflects GOLD, not white, so the low value is also the
+            // physically honest one; the tier's warmth now comes from the print
+            // and the fresnel/grain accent rather than from a white sheen.
+            specular = 0.22f;
+        }
     } else {
         // BB_TIER_NONE (and any future/unknown code): a whisper of sheen, the
         // same "printed card catches the light" the flat tiers had before.
@@ -354,6 +402,6 @@ void cardSurface(realitykit::surface_parameters params)
 
     params.surface().set_roughness(half(mix(0.42f, roughness, holoStrength)));
     params.surface().set_metallic(half(0.0f));
-    params.surface().set_specular(half(0.5f));
+    params.surface().set_specular(half(specular));
     params.surface().set_ambient_occlusion(half(1.0f));
 }
