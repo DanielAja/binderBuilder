@@ -42,6 +42,8 @@ struct BinderTabView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 130)
+            .padding(4)
+            .floatingGlass()
             .padding(.top, 8)
             .accessibilityLabel("Binder view style")
         }

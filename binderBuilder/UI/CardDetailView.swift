@@ -129,6 +129,11 @@ struct CardDetailView: View {
                             }
                         }
                     }
+                    Button {
+                        addToDisplayCase()
+                    } label: {
+                        Label("Add to Display Case", systemImage: "sparkles.rectangle.stack")
+                    }
                     Menu("Add to Group") {
                         ForEach(env.groups.groups) { group in
                             Button {
@@ -252,6 +257,16 @@ struct CardDetailView: View {
         .padding()
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
+    }
+
+    private func addToDisplayCase() {
+        guard let position = env.binders.firstEmptyDisplaySlot() else {
+            showToast("Display cases are full")
+            return
+        }
+        env.binders.setDisplayCase(ref, at: position)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showToast("On display — see the shelf")
     }
 
     private func addToBinder(_ binderID: String) {

@@ -23,8 +23,14 @@ final class SceneModeController {
     private let binderRoot: Entity
     /// Called when the binder opens (so the flip controller can refresh).
     var onEnterBinder: (() -> Void)?
-    /// Called when a display case is tapped (index 0...2).
+    /// Called when a shelf binder is tapped. The owner runs the pull-out
+    /// animation + content switch, then calls `enterBinder()`. When unset,
+    /// taps fall back to a plain `enterBinder()`.
+    var onOpenBinder: ((String) -> Void)?
+    /// Called when a display case is tapped.
     var onTapDisplayCase: ((Int) -> Void)?
+    /// Called when the ghost "add a display" pedestal is tapped.
+    var onTapAddDisplay: (() -> Void)?
 
     var isShelf: Bool { mode == .shelf }
 
@@ -54,8 +60,7 @@ final class SceneModeController {
     func enterBinder() {
         guard mode == .shelf else { return }
         mode = .binderOpen
-        shelfRoot.isEnabled = false
-        binderRoot.isEnabled = true
+        crossfade(hide: shelfRoot, show: binderRoot)
         cameraRig.animate(to: .binderOpen)
         onEnterBinder?()
         Self.log.info("Entered binder")
@@ -66,10 +71,38 @@ final class SceneModeController {
         mode = .shelf
         shelfYaw = 0
         shelfPitch = 0
-        binderRoot.isEnabled = false
-        shelfRoot.isEnabled = true
+        crossfade(hide: binderRoot, show: shelfRoot)
         cameraRig.animate(to: .shelf)
         Self.log.info("Returned to shelf")
+    }
+
+    /// Fades the outgoing root out while the incoming one fades in, riding
+    /// the camera dolly — replaces the old hard isEnabled cut. Falls back to
+    /// the cut if the opacity animation can't be built.
+    private func crossfade(hide: Entity, show: Entity, duration: TimeInterval = 0.35) {
+        show.isEnabled = true
+        let fadeIn = FromToByAnimation<Float>(
+            from: 0, to: 1, duration: duration, timing: .easeInOut, bindTarget: .opacity)
+        let fadeOut = FromToByAnimation<Float>(
+            from: 1, to: 0, duration: duration, timing: .easeInOut, bindTarget: .opacity)
+        guard let inResource = try? AnimationResource.generate(with: fadeIn),
+              let outResource = try? AnimationResource.generate(with: fadeOut) else {
+            hide.isEnabled = false
+            return
+        }
+        show.components.set(OpacityComponent(opacity: 0))
+        hide.components.set(OpacityComponent(opacity: 1))
+        show.playAnimation(inResource)
+        hide.playAnimation(outResource)
+        Task {
+            try? await Task.sleep(for: .seconds(duration + 0.03))
+            // Only disable if no later transition re-showed this root.
+            if (hide === shelfRoot && mode != .shelf) || (hide === binderRoot && mode == .shelf) {
+                hide.isEnabled = false
+            }
+            hide.components.remove(OpacityComponent.self)
+            show.components.remove(OpacityComponent.self)
+        }
     }
 
     // MARK: Shelf pan (orbit) — touch-drag to look around the shelf.
@@ -102,8 +135,10 @@ final class SceneModeController {
             while let current = entity {
                 if let target = current.components[ShelfTargetComponent.self] {
                     switch target.kind {
-                    case .binder: enterBinder()
+                    case .binder(let id):
+                        if let onOpenBinder { onOpenBinder(id) } else { enterBinder() }
                     case .display(let index): onTapDisplayCase?(index)
+                    case .addDisplay: onTapAddDisplay?()
                     }
                     return true
                 }

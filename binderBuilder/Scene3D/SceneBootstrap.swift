@@ -30,6 +30,8 @@ struct SceneBootstrapResult {
     let cardInteraction: CardInteractionController?
     /// Shelf <-> binder mode switching + camera transitions.
     let modeController: SceneModeController?
+    /// Keeps the shelf's binder + display rows in sync with the stores.
+    let shelfController: ShelfController?
     /// Device-motion source driving the holo sweep; kept alive by the result.
     let motionProvider: any MotionProvider
     /// "gpu" or "cpu" — what actually got used after any fallback.
@@ -144,6 +146,10 @@ enum SceneBootstrap {
             texture: texture
         )
 
+        // One texture cache serves the pocket cards and the shelf's display
+        // cards, so a card seen in both places decodes once.
+        let cardTextures = textureCache ?? CardTextureCache(imageCache: .standard())
+
         var controller: BinderFlipController?
         var router: GestureRouter?
         var cardInteraction: CardInteractionController?
@@ -163,7 +169,6 @@ enum SceneBootstrap {
             // Card layer: spawn/despawn pocket cards on every rebind, then
             // rebind once now that the hook is wired so the initial spread
             // gets its cards. (The init's first rebind ran before this hook.)
-            let cardTextures = textureCache ?? CardTextureCache(imageCache: .standard())
             let placement = CardPlacement(provider: contentSource, textures: cardTextures)
             flipController.onRebound = { placement.rebound($0) }
             flipController.rebind(spread: flipController.spreadIndex)
@@ -213,9 +218,14 @@ enum SceneBootstrap {
 
         log.info("Page deformer active: \(activeLabel, privacy: .public)")
 
-        // Shelf "home" scene: tap the standing binder to dolly into it.
+        // Shelf "home" scene: static furniture here; the data-driven binder +
+        // display rows are populated by ShelfController from BinderSceneView
+        // (on appear and whenever the stores change).
         let shelfRig = ShelfSceneBuilder.build()
         root.addChild(shelfRig.root)
+        let shelfController = ShelfController(
+            binderRow: shelfRig.binderRow, displayRow: shelfRig.displayRow, textures: cardTextures
+        )
         let initialMode: AppMode
         switch launchState.uiState {
         case .binderOpen, .cardFloating: initialMode = .binderOpen
@@ -234,6 +244,7 @@ enum SceneBootstrap {
             router: router,
             cardInteraction: cardInteraction,
             modeController: modeController,
+            shelfController: shelfController,
             motionProvider: motionProvider,
             activeDeformerLabel: activeLabel
         )

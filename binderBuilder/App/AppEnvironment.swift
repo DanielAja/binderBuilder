@@ -61,8 +61,7 @@ final class AppEnvironment {
     @ObservationIgnored private var _scene: SceneModel?
     var scene: SceneModel {
         if let _scene { return _scene }
-        let made = SceneModel(
-            content: content.sheetCount > 0 ? content : nil, textureCache: textureCache)
+        let made = SceneModel(content: content, textureCache: textureCache)
         _scene = made
         return made
     }
@@ -131,6 +130,22 @@ final class AppEnvironment {
         await DemoSeed.seedIfNeeded(
             settings: settings, catalog: catalog, collection: collection, binders: binders
         )
+        #if DEBUG
+        // -shelfDemo: a populated shelf (several binders + display-case cards)
+        // for screenshots and walkthroughs of the multi-binder row.
+        if DebugLaunchState.launchFlag("-shelfDemo") {
+            let extras = [("Chase & Grails", "#8E24AA"), ("Trade Stock", "#2E7D32"),
+                          ("Vintage", "#B23A2E"), ("Modern Hits", "#E8B23A")]
+            for (name, color) in extras where !binders.binders.contains(where: { $0.name == name }) {
+                binders.createBinder(name: name, coverColor: color, pageCount: 4)
+            }
+            if binders.displayCase.allSatisfy({ $0 == nil }) {
+                binders.setDisplayCase(CardRef(cardID: "base1-4", variant: .holo), at: 0)
+                binders.setDisplayCase(CardRef(cardID: "base1-15", variant: .holo), at: 1)
+                binders.setDisplayCase(CardRef(cardID: "base1-58", variant: .normal), at: 2)
+            }
+        }
+        #endif
         // Restore the binder last opened in 3D; fall back to the first.
         let restored = settings.lastOpenBinderID.flatMap { id in
             binders.binders.first(where: { $0.id == id })

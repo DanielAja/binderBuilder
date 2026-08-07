@@ -39,6 +39,18 @@ struct BinderSceneView: View {
     @State private var pocketActions: PocketHit?
     /// Pocket waiting for a card from the picker sheet.
     @State private var pocketToFill: PocketHit?
+    /// Edit mode: sheet index awaiting remove confirmation.
+    @State private var pageToRemove: Int?
+
+    /// Display case (shelf): empty slot awaiting a pick / occupied slot
+    /// awaiting a View / Replace / Remove choice.
+    @State private var displayPicker: DisplaySlot?
+    @State private var displayActions: Int?
+
+    private struct DisplaySlot: Identifiable {
+        let index: Int
+        var id: Int { index }
+    }
 
     init(env: AppEnvironment) {
         self.env = env
@@ -84,6 +96,48 @@ struct BinderSceneView: View {
             Button("Remove from Binder", role: .destructive) { empty(pocket) }
             Button("Cancel", role: .cancel) {}
         }
+        .sheet(item: $displayPicker) { slot in
+            DisplayCasePickerView(env: env) { ref in
+                env.binders.setDisplayCase(ref, at: slot.index)
+                Haptics.success()
+            }
+        }
+        .confirmationDialog(
+            "Display case",
+            isPresented: Binding(
+                get: { displayActions != nil },
+                set: { if !$0 { displayActions = nil } }),
+            titleVisibility: .visible,
+            presenting: displayActions
+        ) { index in
+            Button("View Card") { showDisplayedCard(at: index) }
+            Button("Replace…") { Task { displayPicker = DisplaySlot(index: index) } }
+            Button("Remove from Display", role: .destructive) {
+                env.binders.setDisplayCase(nil, at: index)
+                Haptics.impact(.medium)
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            pageToRemove.map { "Remove page \($0 + 1)?" } ?? "Remove page?",
+            isPresented: Binding(
+                get: { pageToRemove != nil },
+                set: { if !$0 { pageToRemove = nil } }),
+            titleVisibility: .visible,
+            presenting: pageToRemove
+        ) { sheet in
+            Button("Remove Page \(sheet + 1)", role: .destructive) { removePage(sheet) }
+            Button("Cancel", role: .cancel) {}
+        } message: { sheet in
+            let count = env.openBinderID.map {
+                env.binders.assignmentCount(binderID: $0, pageIndex: sheet)
+            } ?? 0
+            Text(count == 0
+                ? "This sheet is empty."
+                : "\(count) card\(count == 1 ? "" : "s") will be removed from this binder. They stay in your collection.")
+        }
+        .onChange(of: env.binders.binders) { refreshShelf() }
+        .onChange(of: env.binders.displayCase) { refreshShelf() }
         .onChange(of: env.binders.changeToken) {
             reconcileContentIfStale()
         }
@@ -91,6 +145,8 @@ struct BinderSceneView: View {
             // Edits can land while this tab is unmounted (2D grid, card
             // detail, scans) — catch up before the first frame shows.
             reconcileContentIfStale()
+            wireShelfCallbacks()
+            refreshShelf()
             // Single source of truth for the owned-toggle bar: fires on every
             // pull/return, gesture-driven or programmatic (debug auto-pull
             // included), so the bar never needs bespoke bookkeeping per path.
@@ -198,7 +254,16 @@ struct BinderSceneView: View {
                 }
             }
             Spacer()
-            if editMode { editHint } else { ownedToggleBar }
+            if editMode {
+                VStack(spacing: 10) {
+                    pageEditBar
+                    editHint
+                }
+            } else if binderNeedsPages {
+                addPagesCTA
+            } else {
+                ownedToggleBar
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, 16)
@@ -241,6 +306,59 @@ struct BinderSceneView: View {
             ? "Stops editing, so tapping a card lifts it out again"
             : "Lets you tap a pocket to add, replace, or remove its card")
         .accessibilityAddTraits(editMode ? [.isSelected] : [])
+    }
+
+    /// Edit-mode page controls: insert a sheet at the open spread / remove
+    /// the sheet on the right (with an occupied-count confirmation).
+    private var pageEditBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                if let sheet = currentEditSheet { pageToRemove = sheet }
+            } label: {
+                Label("Page", systemImage: "minus.rectangle.portrait")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .floatingGlass()
+            }
+            .tint(.white)
+            .disabled(currentEditSheet == nil)
+            .accessibilityLabel("Remove this page")
+
+            Button {
+                insertPageAtCurrentSpread()
+            } label: {
+                Label("Page", systemImage: "plus.rectangle.portrait")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .floatingGlass()
+            }
+            .tint(.white)
+            .accessibilityLabel("Add a page here")
+        }
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    /// True when the open binder has no sheets — real users should see a way
+    /// forward, never a blank slab (or worse, debug demo cards).
+    private var binderNeedsPages: Bool {
+        guard sceneMode != .shelf, let binderID = env.openBinderID,
+              let binder = env.binders.binders.first(where: { $0.id == binderID }) else { return false }
+        return binder.pageCount == 0
+    }
+
+    private var addPagesCTA: some View {
+        Button {
+            guard let binderID = env.openBinderID else { return }
+            if env.binders.addPages(1, to: binderID) { Haptics.impact(.soft) }
+        } label: {
+            Label("Add pages to start", systemImage: "plus.rectangle.portrait")
+                .font(.headline)
+                .padding(.horizontal, 18).padding(.vertical, 12)
+                .floatingGlass()
+        }
+        .tint(.white)
+        .accessibilityHint("Adds the binder's first page")
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     private var editHint: some View {
@@ -306,6 +424,104 @@ struct BinderSceneView: View {
         Haptics.success()
     }
 
+    // MARK: Shelf (data-driven rows + tap routing)
+
+    /// Rebuilds the shelf's binder + display rows from the stores (cheap; the
+    /// controller skips rebuilds when nothing changed).
+    private func refreshShelf() {
+        guard let shelf = model.result.shelfController else { return }
+        shelf.refreshBinders(env.binders.binders, openBinderID: env.openBinderID)
+        Task {
+            let contents = await env.binders.displayCaseContents()
+            shelf.refreshDisplayCases(contents, maxCount: BinderStore.displayCaseMaxCount)
+        }
+    }
+
+    private func wireShelfCallbacks() {
+        guard let modeController = model.result.modeController else { return }
+        modeController.onOpenBinder = { id in openBinderFromShelf(id) }
+        modeController.onTapDisplayCase = { index in
+            Haptics.impact(.light)
+            let occupied = env.binders.displayCase.indices.contains(index)
+                && env.binders.displayCase[index] != nil
+            if occupied { displayActions = index } else { displayPicker = DisplaySlot(index: index) }
+        }
+        modeController.onTapAddDisplay = {
+            if env.binders.setDisplayCaseCount(env.binders.displayCaseCount + 1) {
+                Haptics.success()
+            }
+        }
+    }
+
+    /// Pull-and-turn: the tapped binder slides toward the camera with a
+    /// slight turn, the content switches IN PLACE (no scene rebuild — the
+    /// flip controller reads sheetCount live), and the camera dollies in
+    /// while the roots crossfade. The shelf pose resets once hidden.
+    private func openBinderFromShelf(_ binderID: String) {
+        guard let modeController = model.result.modeController else { return }
+        Haptics.impact(.medium)
+        let entity = model.result.shelfController?.binderEntity(id: binderID)
+        if let entity {
+            var transform = entity.transform
+            transform.translation += SIMD3<Float>(0, 0.015, 0.12)
+            transform.rotation = simd_quatf(angle: 0.18, axis: SIMD3<Float>(0, 1, 0)) * transform.rotation
+            entity.move(to: transform, relativeTo: entity.parent, duration: 0.25, timingFunction: .easeInOut)
+        }
+        Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            await env.openBinder(binderID)
+            if let controller = model.result.controller {
+                controller.rebind(spread: controller.sheetCount / 2)
+            }
+            modeController.enterBinder()
+            sceneMode = .binderOpen
+            // Put the pulled binder back once the crossfade has hidden the
+            // shelf, so returning shows it seated again.
+            try? await Task.sleep(for: .milliseconds(450))
+            model.result.shelfController?.resetBinderPose(id: binderID)
+        }
+    }
+
+    private func showDisplayedCard(at index: Int) {
+        guard env.binders.displayCase.indices.contains(index),
+              let ref = env.binders.displayCase[index] else { return }
+        Task {
+            if let detail = try? await env.catalog?.card(id: ref.cardID) {
+                debugDetail = detail.summary
+            }
+        }
+    }
+
+    // MARK: Page add/remove (edit mode)
+
+    /// The sheet the "remove" button targets: the right page's sheet, or the
+    /// last sheet when the binder is open at the very back.
+    private var currentEditSheet: Int? {
+        guard let binderID = env.openBinderID,
+              let binder = env.binders.binders.first(where: { $0.id == binderID }),
+              binder.pageCount > 0,
+              let controller = model.result.controller else { return nil }
+        return min(controller.spreadIndex, binder.pageCount - 1)
+    }
+
+    private func insertPageAtCurrentSpread() {
+        guard let binderID = env.openBinderID,
+              let binder = env.binders.binders.first(where: { $0.id == binderID }),
+              let controller = model.result.controller else { return }
+        let at = min(controller.spreadIndex, binder.pageCount)
+        guard env.binders.insertPage(at: at, in: binderID) else { return }
+        Haptics.impact(.soft)
+    }
+
+    private func removePage(_ sheet: Int) {
+        guard let binderID = env.openBinderID else { return }
+        guard env.binders.removePage(at: sheet, from: binderID) else {
+            env.errors.show("Couldn't remove that page.")
+            return
+        }
+        Haptics.impact(.medium)
+    }
+
     /// The single owner of 3D content refresh: when the store's changeToken
     /// has moved past the snapshot the scene renders (`env.contentToken`),
     /// re-point at a surviving binder if needed, re-snapshot in place, and
@@ -350,10 +566,13 @@ final class SceneModel {
     let result: SceneBootstrapResult
 
     init(content: (any CardContentProviding)?, textureCache: CardTextureCache?) {
-        // An empty/absent binder falls back to the built-in debug content so
-        // the scene is never blank.
+        // Real content always drives the scene — an empty binder renders as
+        // covers + an "add pages" call to action, never as fabricated cards.
+        // -debugContent forces the built-in debug sheets (screenshot harness,
+        // shader spot checks); assemble also falls back to them when it gets
+        // nil (unit tests exercising the scene without a store).
         let usableContent: (any CardContentProviding)? =
-            (content?.sheetCount ?? 0) > 0 ? content : nil
+            DebugLaunchState.launchFlag("-debugContent") ? nil : content
         result = SceneBootstrap.assemble(cardContent: usableContent, textureCache: textureCache)
     }
 }
