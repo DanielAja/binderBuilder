@@ -259,7 +259,9 @@ struct CardDetailView: View {
             showToast("Binder is full"); return
         }
         if !owned { env.collection.setOwned(ref, quantity: 1) }
-        env.binders.assign(ref, to: slot)
+        // setSlot (not the quiet assign) so the 3D scene's token observer
+        // sees the change — the card shows up in the binder immediately.
+        env.binders.setSlot(ref, at: slot)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         showToast("Added to \(env.binders.binders.first { $0.id == binderID }?.name ?? "binder")")
     }

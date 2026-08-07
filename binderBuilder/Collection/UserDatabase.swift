@@ -199,6 +199,18 @@ nonisolated final class UserDatabase: Sendable {
                 );
                 """)
         }
+        // v7 — shelf configuration. The display-case slot count is user data
+        // (it sizes the display_case rows and rides along in backups), so it
+        // lives in the database rather than UserDefaults.
+        migrator.registerMigration("v7") { db in
+            try db.execute(sql: """
+                CREATE TABLE shelf_config (
+                  id INTEGER PRIMARY KEY CHECK (id = 0),
+                  display_slot_count INTEGER NOT NULL DEFAULT 3
+                );
+                INSERT INTO shelf_config (id, display_slot_count) VALUES (0, 3);
+                """)
+        }
         return migrator
     }
 }

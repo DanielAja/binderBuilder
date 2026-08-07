@@ -46,6 +46,17 @@ final class AppEnvironment {
     let content = LiveBinderCardContent()
     private(set) var isReady = false
 
+    /// The `binders.changeToken` value the current content snapshot was built
+    /// from. When it trails the live token, the 3D content is stale — the
+    /// Binder tab reconciles on appear and on token changes, so edits made
+    /// from anywhere (2D grid, card detail, scans) always reach the scene.
+    private(set) var contentToken = 0
+
+    /// Records that `content` was just rebuilt from the store's current state.
+    private func markContentFresh() {
+        contentToken = binders.changeToken
+    }
+
     /// The 3D scene, built once and reused across tab switches.
     @ObservationIgnored private var _scene: SceneModel?
     var scene: SceneModel {
@@ -120,13 +131,18 @@ final class AppEnvironment {
         await DemoSeed.seedIfNeeded(
             settings: settings, catalog: catalog, collection: collection, binders: binders
         )
-        guard let binder = binders.binders.first else {
+        // Restore the binder last opened in 3D; fall back to the first.
+        let restored = settings.lastOpenBinderID.flatMap { id in
+            binders.binders.first(where: { $0.id == id })
+        }
+        guard let binder = restored ?? binders.binders.first else {
             Self.log.error("No binder to open after seeding")
             isReady = true
             return
         }
         openBinderID = binder.id
         content.replace(with: await BinderCardContentBuilder.build(binderID: binder.id, store: binders))
+        markContentFresh()
         Self.log.info("Prepared binder \(binder.id, privacy: .public) with \(self.content.sheetCount, privacy: .public) sheets")
         // Seed the "known sets" baseline so new-release alerts only fire for
         // sets released after this catalog build.
@@ -137,13 +153,42 @@ final class AppEnvironment {
         if let launchWarning { errors.show(launchWarning) }
     }
 
+    /// Switches which binder the 3D scene renders, IN PLACE: replaces the live
+    /// content snapshot and leaves the scene standing (the flip controller
+    /// reads `sheetCount` live, so the page stacks resize on the next rebind).
+    /// Callers rebind the page pool afterwards. Persists the choice for the
+    /// next launch. No-op for unknown ids; a no-op when already open still
+    /// re-snapshots (cheap, and callers rely on fresh content).
+    func openBinder(_ binderID: String) async {
+        guard binders.binders.contains(where: { $0.id == binderID }) else { return }
+        openBinderID = binderID
+        settings.lastOpenBinderID = binderID
+        content.replace(with: await BinderCardContentBuilder.build(binderID: binderID, store: binders))
+        markContentFresh()
+    }
+
+    /// Called when the binder list may have changed under the open binder
+    /// (e.g. it was deleted): re-points the scene at the first remaining
+    /// binder, or empties the content when none remain.
+    func reconcileOpenBinder() async {
+        if let openBinderID, binders.binders.contains(where: { $0.id == openBinderID }) { return }
+        if let fallback = binders.binders.first {
+            await openBinder(fallback.id)
+        } else {
+            openBinderID = nil
+            settings.lastOpenBinderID = nil
+            content.replace(with: BinderCardContent.empty)
+            markContentFresh()
+        }
+    }
+
     /// Re-snapshots the open binder and drops the cached scene, so the Binder
     /// tab rebuilds its 3D content with the binder's new card order. A no-op
     /// unless `binderID` is the binder currently rendered in 3D.
     ///
-    /// Use this for whole-binder changes (a sort). A single pocket edit should
-    /// use `reloadOpenBinderContent` instead — rebuilding the scene also resets
-    /// the camera and the open spread, which is far too much for one card.
+    /// The heavyweight escape hatch — resets the camera and the open spread.
+    /// Prefer `reloadOpenBinderContent`/`openBinder`, which leave the scene
+    /// standing.
     func refreshOpenBinder(_ binderID: String) async {
         guard binderID == openBinderID else { return }
         await reloadOpenBinderContent(binderID)
@@ -160,6 +205,7 @@ final class AppEnvironment {
     func reloadOpenBinderContent(_ binderID: String) async -> Bool {
         guard binderID == openBinderID else { return false }
         content.replace(with: await BinderCardContentBuilder.build(binderID: binderID, store: binders))
+        markContentFresh()
         return true
     }
 

@@ -110,13 +110,15 @@ struct ScanView: View {
         guard !chosen.isEmpty,
               let binder = env.binders.createBinder(name: "Scanned Page", coverColor: "#2E7D32", pageCount: 1)
         else { busy = false; dismiss(); return }
-        for slot in results {
-            guard let match = slot.chosen else { continue }
-            let ref = CardRef(cardID: match.cardID, variant: .normal)
-            env.binders.assign(ref, to: SlotLocation(
-                binderID: binder.id, pageIndex: 0, side: .front, slotIndex: slot.slotIndex
-            ))
-            env.collection.setOwned(ref, quantity: 1)
+        env.binders.commitBatch { binders in
+            for slot in results {
+                guard let match = slot.chosen else { continue }
+                let ref = CardRef(cardID: match.cardID, variant: .normal)
+                binders.assign(ref, to: SlotLocation(
+                    binderID: binder.id, pageIndex: 0, side: .front, slotIndex: slot.slotIndex
+                ))
+                env.collection.setOwned(ref, quantity: 1)
+            }
         }
         busy = false
         dismiss()

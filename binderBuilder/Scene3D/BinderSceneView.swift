@@ -84,7 +84,13 @@ struct BinderSceneView: View {
             Button("Remove from Binder", role: .destructive) { empty(pocket) }
             Button("Cancel", role: .cancel) {}
         }
+        .onChange(of: env.binders.changeToken) {
+            reconcileContentIfStale()
+        }
         .onAppear {
+            // Edits can land while this tab is unmounted (2D grid, card
+            // detail, scans) — catch up before the first frame shows.
+            reconcileContentIfStale()
             // Single source of truth for the owned-toggle bar: fires on every
             // pull/return, gesture-driven or programmatic (debug auto-pull
             // included), so the bar never needs bespoke bookkeeping per path.
@@ -287,10 +293,10 @@ struct BinderSceneView: View {
         }
     }
 
-    /// One pocket edit: a single store transaction (which bumps the binder's
-    /// changeToken), a live re-snapshot of its content, and a pool rebind so
-    /// the 3D updates on the spot — without tearing the scene down, which
-    /// would reset the camera and the open spread for the sake of one card.
+    /// One pocket edit: a single store transaction. The write bumps the
+    /// binder's changeToken, and the token observer above owns the re-snapshot
+    /// + pool rebind — every write path refreshes the scene through that one
+    /// funnel, so none can forget to.
     private func commit(binderID: String, failure: String, _ write: () -> Bool) {
         guard write() else {
             env.errors.show(failure)
@@ -298,8 +304,19 @@ struct BinderSceneView: View {
             return
         }
         Haptics.success()
+    }
+
+    /// The single owner of 3D content refresh: when the store's changeToken
+    /// has moved past the snapshot the scene renders (`env.contentToken`),
+    /// re-point at a surviving binder if needed, re-snapshot in place, and
+    /// rebind the page pool. Camera and open spread survive (`rebind` clamps).
+    private func reconcileContentIfStale() {
+        guard env.binders.changeToken != env.contentToken else { return }
         Task {
-            await env.reloadOpenBinderContent(binderID)
+            await env.reconcileOpenBinder()
+            if let id = env.openBinderID {
+                await env.reloadOpenBinderContent(id)
+            }
             if let controller = model.result.controller {
                 controller.rebind(spread: controller.spreadIndex)
             }

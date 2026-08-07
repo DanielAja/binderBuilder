@@ -18,8 +18,16 @@ struct UserDatabaseTests {
         }
         #expect(tables == ["binder", "card_copy", "card_group", "display_case", "drop_subscription",
                            "favorite_store", "group_member", "known_set", "price_alert",
-                           "price_cache", "slot_assignment", "trade", "trade_item", "trade_list",
-                           "value_snapshot", "wishlist"])
+                           "price_cache", "shelf_config", "slot_assignment", "trade", "trade_item",
+                           "trade_list", "value_snapshot", "wishlist"])
+    }
+
+    @Test func v7SeedsTheShelfConfigRow() throws {
+        let user = try UserDatabase.inMemory()
+        let count = try user.queue.read { db in
+            try Int.fetchOne(db, sql: "SELECT display_slot_count FROM shelf_config WHERE id = 0")
+        }
+        #expect(count == 3)
     }
 
     @Test func v4CreatesHotPathIndices() throws {

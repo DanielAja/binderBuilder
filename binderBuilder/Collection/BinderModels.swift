@@ -38,6 +38,32 @@ nonisolated struct SlotLocation: Hashable, Sendable {
     var slotIndex: Int
 }
 
+/// How `BinderStore.moveCard` resolves a move onto an occupied pocket.
+nonisolated enum SlotMoveMode: Sendable, Hashable {
+    /// The two pockets trade contents (moving onto an empty pocket is a
+    /// plain move).
+    case swap
+    /// The moved card takes the target pocket and the cards after it ripple
+    /// forward one pocket each — across side and page boundaries — until the
+    /// first empty pocket absorbs the run. The source's vacated pocket counts
+    /// as a gap, so moving a card backward shifts only the cards between.
+    case insertShift
+}
+
+/// What `moveCard` changed beyond the moved card itself: the pockets that
+/// received a rippled card, in ripple order. Empty for swaps and for moves
+/// onto an empty pocket. Drives the 2D editor's cascade animation.
+nonisolated struct MoveResult: Sendable, Equatable {
+    let shifted: [SlotLocation]
+}
+
+/// One persisted pocket assignment — the unit of the 2D editor's undo
+/// snapshots (`BinderStore.assignments`/`restoreAssignments`).
+nonisolated struct SlotAssignmentRow: Sendable, Equatable {
+    let location: SlotLocation
+    let ref: CardRef
+}
+
 /// What a pocket displays: the card, the chosen variant, and whether the
 /// user owns that exact printing (unowned renders grayscale in 3D).
 nonisolated struct SlotContent: Equatable, Sendable {

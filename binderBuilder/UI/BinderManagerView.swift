@@ -171,7 +171,8 @@ struct BinderManagerView: View {
                 return
             }
             Haptics.success()
-            await env.refreshOpenBinder(pending.binder.id)
+            // sort() bumped the changeToken; the Binder tab's observer
+            // re-snapshots in place, so the camera and spread survive.
             env.errors.show("Sorted \(pending.binder.name) by \(pending.key.title).", isError: false)
         }
     }

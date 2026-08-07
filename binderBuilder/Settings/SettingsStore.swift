@@ -14,6 +14,7 @@ import Observation
         static let ebayEnabled = "ebayEnabled"
         static let demoSeeded = "demoSeeded"
         static let hasSeenOnboarding = "hasSeenOnboarding"
+        static let lastOpenBinderID = "lastOpenBinderID"
         static let priceAlerts = "priceAlertsEnabled"
         static let newReleaseAlerts = "newReleaseAlertsEnabled"
         static let icloudSync = "icloudSyncEnabled"
@@ -42,6 +43,11 @@ import Observation
     /// Whether the first-launch onboarding has been dismissed.
     var hasSeenOnboarding: Bool {
         didSet { defaults.set(hasSeenOnboarding, forKey: DefaultsKey.hasSeenOnboarding) }
+    }
+
+    /// The binder last opened in the 3D scene, restored at launch.
+    var lastOpenBinderID: String? {
+        didSet { defaults.set(lastOpenBinderID, forKey: DefaultsKey.lastOpenBinderID) }
     }
 
     /// Notify when a watched card's price drops below its target / %.
@@ -85,6 +91,7 @@ import Observation
         self.ebayEnabled = defaults.bool(forKey: DefaultsKey.ebayEnabled)
         self.demoSeeded = defaults.bool(forKey: DefaultsKey.demoSeeded)
         self.hasSeenOnboarding = defaults.bool(forKey: DefaultsKey.hasSeenOnboarding)
+        self.lastOpenBinderID = defaults.string(forKey: DefaultsKey.lastOpenBinderID)
         self.priceAlertsEnabled = defaults.bool(forKey: DefaultsKey.priceAlerts)
         self.newReleaseAlertsEnabled = defaults.bool(forKey: DefaultsKey.newReleaseAlerts)
         self.icloudSyncEnabled = defaults.bool(forKey: DefaultsKey.icloudSync)
