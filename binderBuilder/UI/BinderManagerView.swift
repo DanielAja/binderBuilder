@@ -50,16 +50,20 @@ struct BinderManagerView: View {
             }
             Section("Binders") {
                 ForEach(env.binders.binders) { binder in
-                    HStack(spacing: 12) {
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(Color(hex: binder.coverColor) ?? .accentColor)
-                            .frame(width: 26, height: 34)
-                        VStack(alignment: .leading) {
-                            Text(binder.name)
-                            Text("\(binder.pageCount) sheets")
-                                .font(.caption).foregroundStyle(.secondary)
+                    NavigationLink {
+                        Binder2DView(env: env, binderID: binder.id)
+                    } label: {
+                        HStack(spacing: 12) {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color(hex: binder.coverColor) ?? .accentColor)
+                                .frame(width: 26, height: 34)
+                            VStack(alignment: .leading) {
+                                Text(binder.name)
+                                Text("\(binder.pageCount) sheets")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
                         }
-                        Spacer()
                     }
                     .contextMenu {
                         Button("Rename") { renaming = binder; renameText = binder.name }

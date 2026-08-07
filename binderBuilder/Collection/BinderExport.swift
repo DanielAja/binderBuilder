@@ -246,14 +246,8 @@ private struct BinderExportPageView: View {
                 .minimumScaleFactor(0.6)
                 .padding(.bottom, 16)
 
-            VStack(spacing: 10) {
-                ForEach(0..<3, id: \.self) { row in
-                    HStack(spacing: 10) {
-                        ForEach(0..<3, id: \.self) { column in
-                            pocket(slots[safe: row * 3 + column] ?? nil)
-                        }
-                    }
-                }
+            BinderPageGridView(slots: slots) { _, slot in
+                pocket(slot)
             }
 
             Spacer(minLength: 0)
@@ -338,11 +332,4 @@ struct ExportShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
-}
-
-private extension Array {
-    /// Tolerates a short slots array rather than trapping mid-render.
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
-    }
 }
