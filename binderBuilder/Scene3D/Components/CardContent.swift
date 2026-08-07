@@ -66,7 +66,7 @@ nonisolated protocol CardContentProviding: PageContentSource {
     func snapshot(sheet: Int) -> SheetCardSnapshot
 }
 
-extension CardContentProviding {
+nonisolated extension CardContentProviding {
     func occupiedSlots(sheet: Int, side: PageSide) -> UInt16 {
         snapshot(sheet: sheet).occupiedMask(side)
     }

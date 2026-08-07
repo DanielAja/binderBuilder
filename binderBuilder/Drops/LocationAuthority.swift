@@ -24,7 +24,7 @@ final class LocationAuthority: NSObject {
     @ObservationIgnored private var timeoutTask: Task<Void, Never>?
 
     @ObservationIgnored
-    private static let logger = Logger(subsystem: "com.aja.binderBuilder", category: "LocationAuthority")
+    nonisolated private static let logger = Logger(subsystem: "com.aja.binderBuilder", category: "LocationAuthority")
 
     private(set) var authorizationStatus: CLAuthorizationStatus
 
@@ -49,7 +49,7 @@ final class LocationAuthority: NSObject {
             timeoutTask?.cancel()
             timeoutTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(10))
-                await self?.fail(LocationError.timeout)
+                self?.fail(LocationError.timeout)
             }
             manager.requestLocation()
         }

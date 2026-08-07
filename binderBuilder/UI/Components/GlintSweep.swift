@@ -36,7 +36,7 @@ private struct GlintSweepModifier: ViewModifier {
 
     /// Opaque so the shader's `tint.a` is unambiguous; the slightly warm,
     /// sub-white RGB keeps the band from clipping to flat white.
-    private static let tint = Color(.sRGB, red: 0.96, green: 0.94, blue: 0.87, opacity: 1)
+    nonisolated private static let tint = Color(.sRGB, red: 0.96, green: 0.94, blue: 0.87, opacity: 1)
 
     @ViewBuilder func body(content: Content) -> some View {
         if progress <= 0 {

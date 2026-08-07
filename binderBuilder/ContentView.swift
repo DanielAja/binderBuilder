@@ -10,12 +10,20 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var env = AppEnvironment()
+    @State private var showingOnboarding = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
             if env.isReady {
                 RootTabView(env: env)
+                    .onAppear { showingOnboarding = shouldShowOnboarding }
+                    .fullScreenCover(isPresented: $showingOnboarding) {
+                        OnboardingView {
+                            env.settings.hasSeenOnboarding = true
+                            showingOnboarding = false
+                        }
+                    }
             } else {
                 ZStack {
                     LinearGradient(
@@ -46,6 +54,17 @@ struct ContentView: View {
             }
             #endif
         }
+    }
+
+    /// First launch only — and never over a debug/screenshot run that routes
+    /// straight to a specific tab (tools/verify.sh flows must stay uncovered).
+    private var shouldShowOnboarding: Bool {
+        guard !env.settings.hasSeenOnboarding else { return false }
+        if DebugLaunchState.current.uiState != nil { return false }
+        let routingFlags = ["-showSets", "-showCollection", "-showSettings",
+                            "-showDrops", "-showCardDetail", "-showScan", "-fireTestAlert"]
+        if routingFlags.contains(where: { DebugLaunchState.launchFlag($0) }) { return false }
+        return true
     }
 
     @ViewBuilder private var errorBanner: some View {

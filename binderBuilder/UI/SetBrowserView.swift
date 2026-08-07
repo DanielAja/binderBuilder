@@ -193,7 +193,7 @@ struct SetCardsView: View {
         }
         .task(id: set.id) {
             cards = (try? await env.catalog?.cards(inSet: set.id)) ?? []
-            env.imageCache.prefetch(cards, quality: .low, pinned: false)
+            await env.imageCache.prefetch(cards, quality: .low, pinned: false)
             recompute()
         }
         .onChange(of: filter) { recompute() }

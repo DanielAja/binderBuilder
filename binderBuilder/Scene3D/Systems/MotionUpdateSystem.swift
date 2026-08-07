@@ -28,9 +28,9 @@ final class MotionUpdateSystem: System {
     static var holoPhaseOverride: SIMD2<Float>?
 
     /// How strongly device tilt shifts the foil hue.
-    static let tiltGain: Float = 0.6
+    nonisolated static let tiltGain: Float = 0.6
     /// Ambient drift so foils shimmer even when the device is still (cycles/s).
-    static let driftRate: Float = 0.04
+    nonisolated static let driftRate: Float = 0.04
     /// Period / duration / size of the occasional shimmer sweep on the
     /// floating ("main") card. NB `shimmerAmount` is measured in *hue cycles*
     /// added to `lightPhase.x`, not in brightness: a sweep races the foil's

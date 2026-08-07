@@ -10,7 +10,7 @@
 import Foundation
 import GRDB
 
-extension UserDatabase {
+nonisolated extension UserDatabase {
 
     // MARK: - Trade log
 

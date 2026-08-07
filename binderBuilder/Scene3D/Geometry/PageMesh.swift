@@ -89,6 +89,7 @@ nonisolated enum PageMesh {
 
     /// Standard MeshResource (two submeshes -> expects two materials).
     /// Used by the GPU deformer; the CPU deformer builds a LowLevelMesh instead.
+    @MainActor
     static func makeMeshResource() throws -> MeshResource {
         let positions = gridPositions()
         let uvs = gridUVs()
@@ -117,6 +118,7 @@ nonisolated enum PageMesh {
     /// triangles at the extremes of the flip sweep so the static MeshResource
     /// bounds cover every deformed pose (the geometry modifier displaces
     /// vertices but cannot grow culling bounds).
+    @MainActor
     static func makeCombinedMeshResource() throws -> MeshResource {
         var positions = gridPositions()
         var uvs = gridUVs()

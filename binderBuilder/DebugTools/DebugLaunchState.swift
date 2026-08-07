@@ -18,7 +18,7 @@
 
 import Foundation
 
-struct DebugLaunchState {
+nonisolated struct DebugLaunchState {
     enum UIState: String {
         case shelf, binderOpen, cardFloating
     }

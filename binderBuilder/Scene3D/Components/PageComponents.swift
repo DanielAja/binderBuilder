@@ -79,7 +79,7 @@ nonisolated enum PageDynamics {
 /// Curl state machine for one pooled page entity. PageTurnSystem advances
 /// springs, decays gesture psi, computes sag, and applies the resulting
 /// CurlParams through the page's deformer every frame.
-struct PageComponent: Component, Equatable {
+nonisolated struct PageComponent: Component, Equatable {
     nonisolated enum Phase: Equatable, Sendable {
         /// Lying flat (t == 0 right / t == 1 left), or frozen via -curl.
         case rest(t: Float)

@@ -20,7 +20,7 @@ nonisolated protocol PageContentSource {
     func occupiedSlots(sheet: Int, side: PageSide) -> UInt16
 }
 
-extension PageContentSource {
+nonisolated extension PageContentSource {
     /// Occupied pockets across BOTH sides of a sheet (0...18) — the "mass"
     /// of the turning sheet.
     func occupiedCount(sheet: Int) -> Int {

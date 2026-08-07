@@ -103,7 +103,7 @@ import os
         acquiredPrice: Double? = nil,
         notes: String? = nil
     ) -> CardCopy? {
-        var copy = CardCopy(ref: ref, condition: condition, grade: grade,
+        let copy = CardCopy(ref: ref, condition: condition, grade: grade,
                             acquiredPrice: acquiredPrice, notes: notes)
         do {
             try database.queue.write { db in try Self.insert(copy, into: db) }

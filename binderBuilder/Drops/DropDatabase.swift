@@ -12,7 +12,7 @@
 import Foundation
 import GRDB
 
-extension UserDatabase {
+nonisolated extension UserDatabase {
     /// Per-release opt-outs (and explicit opt-ins), keyed by release id.
     /// Releases absent from the map are subscribed.
     func dropSubscriptions() -> [String: Bool] {

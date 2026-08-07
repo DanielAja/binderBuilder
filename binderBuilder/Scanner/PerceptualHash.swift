@@ -14,7 +14,7 @@
 
 import CoreGraphics
 
-enum PerceptualHash {
+nonisolated enum PerceptualHash {
     /// 64-bit dHash of an image (0 on failure).
     static func dHash(_ image: CGImage) -> UInt64 {
         let w = 9, h = 8
