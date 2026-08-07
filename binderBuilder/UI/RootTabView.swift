@@ -64,5 +64,11 @@ struct RootTabView: View {
                 .tag(RootTab.settings)
         }
         .minimizingTabBar()
+        .onChange(of: env.requestedTab) {
+            if let requested = env.requestedTab {
+                tab = requested
+                env.requestedTab = nil
+            }
+        }
     }
 }

@@ -287,6 +287,15 @@ import os
         return counts.front + counts.back
     }
 
+    /// Total cards placed in the binder — for list rows and detail stats.
+    func occupiedCount(binderID: String) -> Int {
+        (try? database.queue.read { db in
+            try Int.fetchOne(
+                db, sql: "SELECT COUNT(*) FROM slot_assignment WHERE binder_id = ?",
+                arguments: [binderID]) ?? 0
+        }) ?? 0
+    }
+
     // MARK: - Spreads
 
     /// Number of openable spreads: one per "gap" around the sheets, see

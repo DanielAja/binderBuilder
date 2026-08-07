@@ -71,6 +71,10 @@ final class AppEnvironment {
     /// fresh snapshot the next time that tab's body is evaluated.
     private(set) var sceneGeneration = 0
 
+    /// Cross-screen tab navigation ("Open in 3D" from a settings page):
+    /// RootTabView observes this, switches, and clears it.
+    var requestedTab: RootTab?
+
     init() {
         let catalogDB = GRDBCatalogDatabase.bundled()
         catalog = catalogDB

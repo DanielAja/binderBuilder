@@ -49,6 +49,13 @@ struct Binder2DView: View {
     // Export.
     @State private var exporter = BinderExportRunner()
 
+    // Insert-&-shift ripple: pockets that received a shifted card flash in
+    // sequence so the user sees exactly what moved.
+    @State private var rippleSlots: [SlotLocation: Int] = [:]
+    @State private var rippleActive = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private struct OccupiedSlot: Identifiable {
         let location: SlotLocation
         let content: SlotContent
@@ -248,6 +255,7 @@ struct Binder2DView: View {
             jiggle: arrangeMode,
             jigglePhase: index,
             highlighted: moveSource == location)
+            .overlay { rippleOverlay(for: location) }
             .accessibilityLabel(pocketLabel(page: page, index: index, content: content))
 
         if arrangeMode {
@@ -459,14 +467,42 @@ struct Binder2DView: View {
     }
 
     private func commitMove(from: SlotLocation, to: SlotLocation) {
-        guard model.move(from: from, to: to, mode: moveMode) != nil else {
+        guard let result = model.move(from: from, to: to, mode: moveMode) else {
             env.errors.show(moveMode == .insertShift
                 ? "No room to shift — the binder is full. Add a page first."
                 : "Couldn't move that card.")
-            Haptics.impact(.rigid)
+            Haptics.error()
             return
         }
         Haptics.success()
+        flashRipple(result.shifted)
+    }
+
+    @ViewBuilder
+    private func rippleOverlay(for location: SlotLocation) -> some View {
+        if let order = rippleSlots[location] {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(Color.accentColor, lineWidth: 2)
+                .opacity(rippleActive ? 0.9 : 0)
+                .animation(
+                    .easeOut(duration: 0.35)
+                        .delay(reduceMotion ? 0 : Double(order) * 0.05),
+                    value: rippleActive)
+        }
+    }
+
+    /// Cascade a highlight along the pockets the shift touched, in ripple
+    /// order, then clear.
+    private func flashRipple(_ shifted: [SlotLocation]) {
+        guard !shifted.isEmpty else { return }
+        rippleSlots = Dictionary(uniqueKeysWithValues: shifted.enumerated().map { ($1, $0) })
+        rippleActive = true
+        Task {
+            try? await Task.sleep(for: .milliseconds(500 + 50 * shifted.count))
+            rippleActive = false
+            try? await Task.sleep(for: .milliseconds(450))
+            rippleSlots = [:]
+        }
     }
 
     private func commitDrag(from source: Int, to target: Int) {

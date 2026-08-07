@@ -52,6 +52,9 @@ struct BinderSceneView: View {
         var id: Int { index }
     }
 
+    /// Quick export from the 3D view (current spread / whole binder).
+    @State private var exporter = BinderExportRunner()
+
     init(env: AppEnvironment) {
         self.env = env
         let scene = env.scene   // cached in AppEnvironment; survives tab switches
@@ -138,6 +141,18 @@ struct BinderSceneView: View {
         }
         .onChange(of: env.binders.binders) { refreshShelf() }
         .onChange(of: env.binders.displayCase) { refreshShelf() }
+        .overlay {
+            if exporter.isRunning {
+                ProgressView("Exporting…", value: exporter.progress)
+                    .progressViewStyle(.linear)
+                    .padding(20)
+                    .frame(maxWidth: 260)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            }
+        }
+        .sheet(item: Binding(get: { exporter.share }, set: { exporter.share = $0 })) { share in
+            ExportShareSheet(urls: share.urls)
+        }
         .onChange(of: env.binders.changeToken) {
             reconcileContentIfStale()
         }
@@ -248,6 +263,7 @@ struct BinderSceneView: View {
                 if sceneMode != .shelf {
                     shelfButton
                     Spacer()
+                    if !editMode && !binderNeedsPages { shareButton }
                     editButton
                 } else {
                     Spacer()
@@ -286,6 +302,48 @@ struct BinderSceneView: View {
         .tint(.white)
         .accessibilityLabel("View shelf")
         .accessibilityHint("Shows your binders and display case")
+    }
+
+    /// Share what you're looking at: the open spread as images, or the whole
+    /// binder as a PDF.
+    private var shareButton: some View {
+        Menu {
+            Button {
+                if let controller = model.result.controller {
+                    export(scope: .spread(spreadIndex: controller.spreadIndex), format: .jpegs)
+                }
+            } label: {
+                Label("Share This Spread", systemImage: "photo.on.rectangle")
+            }
+            Button {
+                export(scope: .all, format: .pdf)
+            } label: {
+                Label("Whole Binder as PDF", systemImage: "doc.richtext")
+            }
+        } label: {
+            Image(systemName: "square.and.arrow.up")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .floatingGlass()
+        }
+        .tint(.white)
+        .accessibilityLabel("Share")
+        .accessibilityHint("Shares the open spread or the whole binder")
+    }
+
+    private func export(scope: BinderExportScope, format: BinderExportFormat) {
+        guard let binderID = env.openBinderID,
+              let binder = env.binders.binders.first(where: { $0.id == binderID }) else { return }
+        Task {
+            let ok = await exporter.run(
+                binder: binder, store: env.binders, cache: env.imageCache,
+                scope: scope, format: format)
+            if ok {
+                Haptics.success()
+            } else {
+                env.errors.show("Nothing to export there yet.")
+            }
+        }
     }
 
     // MARK: Pocket editing
@@ -384,7 +442,11 @@ struct BinderSceneView: View {
 
     private func handleEditTap(at point: CGPoint, viewport: CGSize) {
         let picker = PocketPicker(root: model.result.root, cameraRig: model.result.cameraRig)
-        guard let pocket = picker.pick(at: point, viewport: viewport) else { return }
+        guard let pocket = picker.pick(at: point, viewport: viewport) else {
+            // A miss shouldn't feel like a dead screen.
+            Haptics.warning()
+            return
+        }
         Haptics.impact(.light)
         // An empty pocket has only one sensible action, so skip the menu.
         if pocket.isEmpty { pocketToFill = pocket } else { pocketActions = pocket }

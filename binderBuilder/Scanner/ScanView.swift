@@ -20,6 +20,9 @@ struct ScanView: View {
     @State private var results: [ScanSlotResult] = []
     @State private var names: [String: String] = [:]
     @State private var busy = false
+    /// Where the scanned cards land: an existing binder, or (nil) a fresh
+    /// "Scanned Page" binder — the original behavior stays the default.
+    @State private var destinationID: String?
 
     var body: some View {
         NavigationStack {
@@ -71,6 +74,7 @@ struct ScanView: View {
 
     private var reviewGrid: some View {
         ScrollView {
+            destinationRow
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 12)], spacing: 12) {
                 ForEach($results) { $slot in
                     SlotCell(slot: $slot, name: names[$slot.wrappedValue.chosen?.cardID ?? ""])
@@ -80,6 +84,41 @@ struct ScanView: View {
             Text("Tap a slot to change or clear its match.")
                 .font(.caption).foregroundStyle(.secondary).padding(.bottom)
         }
+    }
+
+    /// Pick which binder the page saves into (default: a fresh one).
+    @ViewBuilder
+    private var destinationRow: some View {
+        if !env.binders.binders.isEmpty {
+            HStack {
+                Text("Save to")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Menu {
+                    Button("New “Scanned Page” binder") { destinationID = nil }
+                    Divider()
+                    ForEach(env.binders.binders) { binder in
+                        Button(binder.name) { destinationID = binder.id }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(destinationName)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2)
+                    }
+                    .font(.subheadline.weight(.semibold))
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top, 10)
+        }
+    }
+
+    private var destinationName: String {
+        destinationID.flatMap { id in
+            env.binders.binders.first(where: { $0.id == id })?.name
+        } ?? "New binder"
     }
 
     // MARK: Actions
@@ -106,10 +145,35 @@ struct ScanView: View {
 
     private func commit() {
         busy = true
+        defer { busy = false; dismiss() }
         let chosen = results.compactMap { $0.chosen }
-        guard !chosen.isEmpty,
-              let binder = env.binders.createBinder(name: "Scanned Page", coverColor: "#2E7D32", pageCount: 1)
-        else { busy = false; dismiss(); return }
+        guard !chosen.isEmpty else { return }
+
+        if let binderID = destinationID,
+           env.binders.binders.contains(where: { $0.id == binderID }) {
+            // Existing binder: fill forward from the first empty pocket
+            // (firstEmptySlot re-reads after each quiet write).
+            var overflow = 0
+            env.binders.commitBatch { binders in
+                for slot in results {
+                    guard let match = slot.chosen else { continue }
+                    let ref = CardRef(cardID: match.cardID, variant: .normal)
+                    if let empty = binders.firstEmptySlot(binderID: binderID) {
+                        binders.assign(ref, to: empty)
+                        env.collection.setOwned(ref, quantity: 1)
+                    } else {
+                        overflow += 1
+                    }
+                }
+            }
+            if overflow > 0 {
+                env.errors.show("\(overflow) card\(overflow == 1 ? "" : "s") didn't fit — the binder is full.")
+            }
+            return
+        }
+
+        guard let binder = env.binders.createBinder(
+            name: "Scanned Page", coverColor: "#2E7D32", pageCount: 1) else { return }
         env.binders.commitBatch { binders in
             for slot in results {
                 guard let match = slot.chosen else { continue }
@@ -120,8 +184,6 @@ struct ScanView: View {
                 env.collection.setOwned(ref, quantity: 1)
             }
         }
-        busy = false
-        dismiss()
     }
 }
 

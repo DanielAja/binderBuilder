@@ -10,7 +10,9 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT="$PROJECT_DIR/binderBuilder.xcodeproj"
 SCHEME="binderBuilder"
 SIM_NAME="${SIM_NAME:-Shots-iPhone16ProMax}"
-DEST="platform=iOS Simulator,name=$SIM_NAME"
+# Optional: SIM_OS=18.5 for sims not on the newest runtime (xcodebuild
+# otherwise resolves name-only destinations as OS:latest and misses them).
+DEST="platform=iOS Simulator,name=$SIM_NAME${SIM_OS:+,OS=$SIM_OS}"
 BUNDLE_ID="com.aja.binderBuilder"
 
 case "${1:-build}" in

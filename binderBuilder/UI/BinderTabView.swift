@@ -13,6 +13,12 @@ struct BinderTabView: View {
     let env: AppEnvironment
     @State private var showGrid = false
 
+    init(env: AppEnvironment) {
+        self.env = env
+        // -showGrid: land on the 2D editor (screenshot harness).
+        _showGrid = State(initialValue: DebugLaunchState.launchFlag("-showGrid"))
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             if showGrid, let binderID = env.openBinderID {
