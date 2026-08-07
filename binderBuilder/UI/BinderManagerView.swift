@@ -74,7 +74,8 @@ struct BinderManagerView: View {
                         }
                         Menu("Export") {
                             Button("PDF") { export(binder, as: .pdf) }
-                            Button("PNGs") { export(binder, as: .pngs) }
+                            Button("PNG Images") { export(binder, as: .pngs) }
+                            Button("JPEG Images") { export(binder, as: .jpegs) }
                         }
                         Button("Delete", role: .destructive) { pendingDelete = binder }
                     }
@@ -199,8 +200,8 @@ struct BinderManagerView: View {
                     pdfDocument = BinderPDFDocument(data: BinderExport.pdfData(job))
                     pdfFilename = BinderExport.fileStem(binder.name)
                     exportingPDF = true
-                case .pngs:
-                    pngShare = BinderPNGShare(urls: try BinderExport.writePNGs(job))
+                case .pngs, .jpegs:
+                    pngShare = BinderPNGShare(urls: try BinderExport.writeImages(job, format: format))
                 }
                 Haptics.success()
             } catch {

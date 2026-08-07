@@ -46,6 +46,9 @@ struct Binder2DView: View {
     // Page ops.
     @State private var pageToRemove: Int?
 
+    // Export.
+    @State private var exporter = BinderExportRunner()
+
     private struct OccupiedSlot: Identifiable {
         let location: SlotLocation
         let content: SlotContent
@@ -66,58 +69,114 @@ struct Binder2DView: View {
                 pageList
             }
         }
-        .navigationTitle(model.binder?.name ?? "Binder")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar { toolbarContent }
-        .safeAreaInset(edge: .bottom) { bottomBar }
-        .sensoryFeedback(.alignment, trigger: previewTargetOrdinal)
-        .task { await model.reload() }
-        .onChange(of: env.binders.changeToken) {
-            Task { await model.reloadIfNeeded() }
+        // Staged so the type-checker sees small chains, not one giant one.
+        .modifier(ChromeModifiers(view: self))
+        .modifier(SheetModifiers(view: self))
+        .modifier(DialogModifiers(view: self))
+    }
+
+    /// Navigation chrome, lifecycle, and observation.
+    private struct ChromeModifiers: ViewModifier {
+        let view: Binder2DView
+
+        func body(content: Content) -> some View {
+            content
+                .navigationTitle(view.model.binder?.name ?? "Binder")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { view.toolbarContent }
+                .safeAreaInset(edge: .bottom) { view.bottomBar }
+                .overlay { view.exportProgressOverlay }
+                .sensoryFeedback(.alignment, trigger: view.previewTargetOrdinal)
+                .task { await view.model.reload() }
+                .onChange(of: view.env.binders.changeToken) {
+                    Task { await view.model.reloadIfNeeded() }
+                }
+                .onChange(of: view.arrangeMode) {
+                    view.resetDragState()
+                    view.moveSource = nil
+                    Haptics.selection()
+                }
         }
-        .onChange(of: arrangeMode) {
-            resetDragState()
-            moveSource = nil
-            Haptics.selection()
+    }
+
+    private struct SheetModifiers: ViewModifier {
+        let view: Binder2DView
+
+        func body(content: Content) -> some View {
+            content
+                .sheet(item: view.$pickerTarget) { slot in
+                    CardPickerView(env: view.env, title: "Add to Pocket") { card in
+                        view.fill(slot, with: card)
+                    }
+                }
+                .sheet(item: view.$detailCard) { card in
+                    NavigationStack { CardDetailView(card: card, env: view.env) }
+                }
+                .sheet(item: view.exportShareBinding) { share in
+                    ExportShareSheet(urls: share.urls)
+                }
         }
-        .sheet(item: $pickerTarget) { slot in
-            CardPickerView(env: env, title: "Add to Pocket") { card in
-                fill(slot, with: card)
-            }
+    }
+
+    private struct DialogModifiers: ViewModifier {
+        let view: Binder2DView
+
+        func body(content: Content) -> some View {
+            content
+                .confirmationDialog(
+                    view.occupiedTarget?.content.card.name ?? "Card",
+                    isPresented: view.occupiedPresented,
+                    titleVisibility: .visible,
+                    presenting: view.occupiedTarget
+                ) { slot in
+                    Button("View Card") { Task { view.detailCard = slot.content.card } }
+                    Button("Replace…") { Task { view.pickerTarget = slot.location } }
+                    Button("Move…") { view.beginTapMove(from: slot.location) }
+                    Button("Remove from Binder", role: .destructive) { view.remove(slot.location) }
+                    Button("Cancel", role: .cancel) {}
+                }
+                .confirmationDialog(
+                    view.removePageTitle,
+                    isPresented: view.removePagePresented,
+                    titleVisibility: .visible,
+                    presenting: view.pageToRemove
+                ) { page in
+                    Button("Remove Page \(page + 1)", role: .destructive) { view.removePage(page) }
+                    Button("Cancel", role: .cancel) {}
+                } message: { page in
+                    Text(view.removePageMessage(page))
+                }
         }
-        .sheet(item: $detailCard) { card in
-            NavigationStack { CardDetailView(card: card, env: env) }
+    }
+
+    @ViewBuilder
+    private var exportProgressOverlay: some View {
+        if exporter.isRunning {
+            ProgressView("Exporting…", value: exporter.progress)
+                .progressViewStyle(.linear)
+                .padding(20)
+                .frame(maxWidth: 260)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         }
-        .confirmationDialog(
-            occupiedTarget.map { "\($0.content.card.name)" } ?? "Card",
-            isPresented: Binding(
-                get: { occupiedTarget != nil },
-                set: { if !$0 { occupiedTarget = nil } }),
-            titleVisibility: .visible,
-            presenting: occupiedTarget
-        ) { slot in
-            Button("View Card") { Task { detailCard = slot.content.card } }
-            Button("Replace…") { Task { pickerTarget = slot.location } }
-            Button("Move…") { beginTapMove(from: slot.location) }
-            Button("Remove from Binder", role: .destructive) { remove(slot.location) }
-            Button("Cancel", role: .cancel) {}
-        }
-        .confirmationDialog(
-            removePageTitle,
-            isPresented: Binding(
-                get: { pageToRemove != nil },
-                set: { if !$0 { pageToRemove = nil } }),
-            titleVisibility: .visible,
-            presenting: pageToRemove
-        ) { page in
-            Button("Remove Page \(page + 1)", role: .destructive) { removePage(page) }
-            Button("Cancel", role: .cancel) {}
-        } message: { page in
-            let count = model.assignmentCount(pageIndex: page)
-            Text(count == 0
-                ? "This sheet is empty."
-                : "\(count) card\(count == 1 ? "" : "s") will be removed from this binder. They stay in your collection.")
-        }
+    }
+
+    private var exportShareBinding: Binding<BinderPNGShare?> {
+        Binding(get: { exporter.share }, set: { exporter.share = $0 })
+    }
+
+    private var occupiedPresented: Binding<Bool> {
+        Binding(get: { occupiedTarget != nil }, set: { if !$0 { occupiedTarget = nil } })
+    }
+
+    private var removePagePresented: Binding<Bool> {
+        Binding(get: { pageToRemove != nil }, set: { if !$0 { pageToRemove = nil } })
+    }
+
+    private func removePageMessage(_ page: Int) -> String {
+        let count = model.assignmentCount(pageIndex: page)
+        return count == 0
+            ? "This sheet is empty."
+            : "\(count) card\(count == 1 ? "" : "s") will be removed from this binder. They stay in your collection."
     }
 
     // MARK: - Page list
@@ -153,6 +212,13 @@ struct Binder2DView: View {
                 Spacer()
                 if !arrangeMode {
                     Menu {
+                        Button {
+                            export(scope: .side(pageIndex: page.pageIndex, side: page.side),
+                                   format: .jpegs)
+                        } label: {
+                            Label("Share Page as Image", systemImage: "square.and.arrow.up")
+                        }
+                        Divider()
                         Button("Insert Page Before") { insertPage(at: page.pageIndex) }
                         Button("Insert Page After") { insertPage(at: page.pageIndex + 1) }
                         Button("Remove Page…", role: .destructive) { pageToRemove = page.pageIndex }
@@ -259,6 +325,28 @@ struct Binder2DView: View {
                     Image(systemName: "arrow.uturn.backward")
                 }
                 .accessibilityLabel("Undo last change")
+            }
+            if !arrangeMode {
+                Menu {
+                    Button {
+                        export(scope: .all, format: .pdf)
+                    } label: {
+                        Label("Whole Binder as PDF", systemImage: "doc.richtext")
+                    }
+                    Button {
+                        export(scope: .all, format: .jpegs)
+                    } label: {
+                        Label("Pages as JPEG Images", systemImage: "photo.on.rectangle")
+                    }
+                    Button {
+                        export(scope: .all, format: .pngs)
+                    } label: {
+                        Label("Pages as PNG Images", systemImage: "photo.stack")
+                    }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .accessibilityLabel("Export binder")
             }
             Button(arrangeMode ? "Done" : "Arrange") {
                 arrangeMode.toggle()
@@ -393,6 +481,20 @@ struct Binder2DView: View {
     private func undo() {
         guard model.undo() else { return }
         Haptics.impact(.light)
+    }
+
+    private func export(scope: BinderExportScope, format: BinderExportFormat) {
+        guard let binder = model.binder else { return }
+        Task {
+            let ok = await exporter.run(
+                binder: binder, store: env.binders, cache: env.imageCache,
+                scope: scope, format: format)
+            if ok {
+                Haptics.success()
+            } else {
+                env.errors.show("Nothing to export there yet.")
+            }
+        }
     }
 
     private func addPage() {

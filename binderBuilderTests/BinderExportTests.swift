@@ -86,6 +86,46 @@ struct BinderExportPureTests {
         #expect(BinderExport.pageTitle(binderName: "Grails", page: page(0, .front, filled: 0))
                 == "Grails — Page 1 (front)")
     }
+
+    @Test func imageFileNamesCarryTheFormatExtension() {
+        #expect(BinderExport.imageFileName(binderName: "My Binder", page: page(0, .front, filled: 1),
+                                           fileExtension: "jpg")
+                == "My-Binder-p01-front.jpg")
+        #expect(BinderExportFormat.jpegs.fileExtension == "jpg")
+        #expect(BinderExportFormat.pngs.fileExtension == "png")
+        #expect(BinderExportFormat.pdf.fileExtension == "pdf")
+    }
+
+    // MARK: - Scopes
+
+    @Test func scopesSelectExactlyTheAskedForSides() {
+        let pages = (0..<3).flatMap { [page($0, .front, filled: $0 == 0 ? 2 : 0),
+                                       page($0, .back, filled: 0)] }
+
+        // .all trims trailing empties (existing behavior).
+        #expect(BinderExport.scoped(pages, scope: .all).count == 1)
+
+        // Explicit scopes keep deliberately empty sides.
+        let side = BinderExport.scoped(pages, scope: .side(pageIndex: 1, side: .back))
+        #expect(side.map(\.pageIndex) == [1])
+        #expect(side.map(\.side) == [.back])
+
+        let sheet = BinderExport.scoped(pages, scope: .sheet(pageIndex: 2))
+        #expect(sheet.map(\.side) == [.front, .back])
+        #expect(sheet.allSatisfy { $0.pageIndex == 2 })
+
+        // A spread is the previous sheet's back + this sheet's front.
+        let spread = BinderExport.scoped(pages, scope: .spread(spreadIndex: 1))
+        #expect(spread.map(\.pageIndex) == [0, 1])
+        #expect(spread.map(\.side) == [.back, .front])
+
+        // Edge spreads have a single visible side.
+        #expect(BinderExport.scoped(pages, scope: .spread(spreadIndex: 0)).map(\.side) == [.front])
+        #expect(BinderExport.scoped(pages, scope: .spread(spreadIndex: 3)).map(\.side) == [.back])
+
+        // Out-of-range scopes are empty, not crashes.
+        #expect(BinderExport.scoped(pages, scope: .sheet(pageIndex: 9)).isEmpty)
+    }
 }
 
 // MARK: - Page building + rendering
@@ -176,5 +216,28 @@ struct BinderExportPureTests {
             // PNG magic number.
             #expect(Array(data.prefix(4)) == [0x89, 0x50, 0x4E, 0x47])
         }
+    }
+
+    @Test func jpegsAreRealJpegsAndScopedExportsStayNarrow() async throws {
+        let (_, binders) = try makeBinderStore()
+        let binder = try #require(binders.createBinder(name: "Jpg Out", coverColor: "#1B6CA8", pageCount: 3))
+        binders.assign(
+            CardRef(cardID: "base1-4", variant: .holo),
+            to: SlotLocation(binderID: binder.id, pageIndex: 1, side: .front, slotIndex: 0))
+
+        // A single-side scope exports exactly one file even in a 3-sheet binder.
+        let pages = BinderExport.scoped(
+            await BinderExport.pages(binderID: binder.id, store: binders),
+            scope: .side(pageIndex: 1, side: .front))
+        #expect(pages.count == 1)
+
+        let job = BinderExportJob(binderName: binder.name, pages: pages, images: [:])
+        let urls = try BinderExport.writeImages(job, format: .jpegs)
+        defer { urls.first.map { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) } }
+
+        #expect(urls.map(\.lastPathComponent) == ["Jpg-Out-p02-front.jpg"])
+        let data = try Data(contentsOf: try #require(urls.first))
+        // JPEG magic number.
+        #expect(Array(data.prefix(3)) == [0xFF, 0xD8, 0xFF])
     }
 }

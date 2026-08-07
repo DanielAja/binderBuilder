@@ -21,6 +21,28 @@ import UniformTypeIdentifiers
 nonisolated enum BinderExportFormat: Sendable {
     case pdf
     case pngs
+    case jpegs
+
+    var fileExtension: String {
+        switch self {
+        case .pdf: return "pdf"
+        case .pngs: return "png"
+        case .jpegs: return "jpg"
+        }
+    }
+}
+
+/// Which part of the binder an export covers. `.all` trims trailing empty
+/// sides; explicit scopes export exactly what was asked (a deliberately
+/// empty side is a valid print target).
+nonisolated enum BinderExportScope: Equatable, Sendable {
+    case all
+    /// One side of one sheet.
+    case side(pageIndex: Int, side: PageSide)
+    /// Both sides of one sheet.
+    case sheet(pageIndex: Int)
+    /// What an open 3D spread shows: sheet (s-1)'s back + sheet s's front.
+    case spread(spreadIndex: Int)
 }
 
 /// One card in an exported pocket.
@@ -79,6 +101,25 @@ enum BinderExport {
         printablePages(pages).count
     }
 
+    /// Applies an export scope to the full page list (see BinderExportScope).
+    nonisolated static func scoped(
+        _ pages: [BinderExportPage], scope: BinderExportScope
+    ) -> [BinderExportPage] {
+        switch scope {
+        case .all:
+            return printablePages(pages)
+        case .side(let pageIndex, let side):
+            return pages.filter { $0.pageIndex == pageIndex && $0.side == side }
+        case .sheet(let pageIndex):
+            return pages.filter { $0.pageIndex == pageIndex }
+        case .spread(let spreadIndex):
+            return pages.filter {
+                ($0.pageIndex == spreadIndex - 1 && $0.side == .back)
+                    || ($0.pageIndex == spreadIndex && $0.side == .front)
+            }
+        }
+    }
+
     /// Filename-safe stem for a binder: "Chase & Grails!" -> "Chase-Grails".
     /// Never empty, so a file can always be written.
     nonisolated static func fileStem(_ binderName: String) -> String {
@@ -92,8 +133,15 @@ enum BinderExport {
 
     /// "Chase-Grails-p03-back.png" — sheet numbers are 1-based for humans.
     nonisolated static func pngFileName(binderName: String, page: BinderExportPage) -> String {
+        imageFileName(binderName: binderName, page: page, fileExtension: "png")
+    }
+
+    nonisolated static func imageFileName(
+        binderName: String, page: BinderExportPage, fileExtension: String
+    ) -> String {
         let side = page.side == .front ? "front" : "back"
-        return String(format: "%@-p%02d-%@.png", fileStem(binderName), page.pageIndex + 1, side)
+        return String(format: "%@-p%02d-%@.%@",
+                      fileStem(binderName), page.pageIndex + 1, side, fileExtension)
     }
 
     /// Page header, e.g. "Chase & Grails — Page 3 (back)".
@@ -110,9 +158,12 @@ enum BinderExport {
         binder: Binder,
         store: BinderStore,
         cache: ImageCache,
+        scope: BinderExportScope = .all,
         progress: (Double) -> Void
     ) async -> BinderExportJob {
-        let pages = printablePages(await self.pages(binderID: binder.id, store: store))
+        // Narrow scopes shrink the art prefetch too — a single page shares
+        // near-instantly instead of fetching the whole binder's art.
+        let pages = scoped(await self.pages(binderID: binder.id, store: store), scope: scope)
         progress(0.05)
 
         // One fetch per card id, even when a card sits in several pockets.
@@ -194,10 +245,20 @@ enum BinderExport {
         }
     }
 
+    /// JPEG output quality (0.9 keeps card text crisp at ~1/4 the PNG size).
+    nonisolated static let jpegQuality: CGFloat = 0.9
+
     /// Writes one PNG per binder side into a fresh temporary folder and
     /// returns the files, ready to hand to a share sheet.
     @MainActor
     static func writePNGs(_ job: BinderExportJob) throws -> [URL] {
+        try writeImages(job, format: .pngs)
+    }
+
+    /// Writes one image per binder side (PNG or JPEG) into a fresh temporary
+    /// folder and returns the files, ready to hand to a share sheet.
+    @MainActor
+    static func writeImages(_ job: BinderExportJob, format: BinderExportFormat) throws -> [URL] {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("BinderExport-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -206,13 +267,30 @@ enum BinderExport {
         for page in job.pages {
             let renderer = ImageRenderer(content: pageView(page, job: job))
             renderer.scale = renderScale
-            guard let data = renderer.uiImage?.pngData() else { continue }
+            let data: Data?
+            switch format {
+            case .jpegs: data = renderer.uiImage?.jpegData(compressionQuality: jpegQuality)
+            case .pngs, .pdf: data = renderer.uiImage?.pngData()
+            }
+            guard let data else { continue }
             let url = folder.appendingPathComponent(
-                pngFileName(binderName: job.binderName, page: page), isDirectory: false)
+                imageFileName(binderName: job.binderName, page: page,
+                              fileExtension: format == .jpegs ? "jpg" : "png"),
+                isDirectory: false)
             try data.write(to: url, options: .atomic)
             urls.append(url)
         }
         return urls
+    }
+
+    /// Renders the job as a PDF file on disk (for share sheets; the
+    /// fileExporter path uses `pdfData` directly).
+    @MainActor
+    static func writePDF(_ job: BinderExportJob) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(fileStem(job.binderName)).pdf", isDirectory: false)
+        try pdfData(job).write(to: url, options: .atomic)
+        return url
     }
 
     @MainActor
@@ -322,6 +400,46 @@ struct BinderPDFDocument: FileDocument {
 struct BinderPNGShare: Identifiable {
     let id = UUID()
     let urls: [URL]
+}
+
+/// Runs an export end-to-end for a view: prepare (with progress) -> render ->
+/// hand the files to a share sheet. One instance per hosting view; the view
+/// observes `isRunning`/`progress` and presents `share` when it arrives.
+@MainActor @Observable final class BinderExportRunner {
+    private(set) var isRunning = false
+    private(set) var progress: Double = 0
+    var share: BinderPNGShare?
+
+    /// Returns false when there was nothing to export or rendering failed.
+    @discardableResult
+    func run(
+        binder: Binder,
+        store: BinderStore,
+        cache: ImageCache,
+        scope: BinderExportScope,
+        format: BinderExportFormat
+    ) async -> Bool {
+        guard !isRunning else { return false }
+        isRunning = true
+        progress = 0
+        defer { isRunning = false }
+
+        let job = await BinderExport.prepare(
+            binder: binder, store: store, cache: cache, scope: scope
+        ) { progress = $0 }
+        guard !job.pages.isEmpty else { return false }
+        do {
+            switch format {
+            case .pdf:
+                share = BinderPNGShare(urls: [try BinderExport.writePDF(job)])
+            case .pngs, .jpegs:
+                share = BinderPNGShare(urls: try BinderExport.writeImages(job, format: format))
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
 }
 
 struct ExportShareSheet: UIViewControllerRepresentable {
