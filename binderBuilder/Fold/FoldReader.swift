@@ -21,11 +21,17 @@
 //    *while* you fold, instead of snapping between two layouts at a
 //    threshold.
 //
-//  Availability. The SDK symbols only exist in Xcode 27.1 (Swift 6.4) and
-//  later, so they sit behind `#if compiler(>=6.4)` as well as the usual
-//  `@available` runtime check. Built with an older toolchain the app still
-//  compiles and simply reports `FoldState.none` — i.e. every device looks
-//  like a regular iPhone, which is exactly the pre-existing behaviour.
+//  Availability. The SDK symbols only exist in the iOS 27.1 SDK, and no
+//  compiler conditional can see an SDK version: Xcode 27.0 already ships
+//  Swift 6.4, so `#if compiler(>=6.4)` is true there while the symbols are
+//  still absent. They therefore sit behind the `DUO_SDK` compilation
+//  condition, which is OFF by default and set in the target's
+//  SWIFT_ACTIVE_COMPILATION_CONDITIONS once Xcode 27.1 is installed, plus the
+//  usual `@available` runtime check. Without it the app compiles on Xcode
+//  27.0 and simply reports `FoldState.none` — every device looks like a
+//  regular iPhone, which is the pre-existing behaviour. The `-fold` launch
+//  argument below still exercises every fold layout on an ordinary
+//  simulator, so the staging stays verifiable in the meantime.
 //
 
 import SwiftUI
@@ -97,9 +103,9 @@ private struct FoldReader: ViewModifier {
 
 nonisolated enum FoldSupport {
     /// Reads the crease out of a geometry proxy. Returns `nil` on any device
-    /// or toolchain without the Duo APIs.
+    /// or SDK without the Duo APIs.
     static func crease(in proxy: GeometryProxy) -> FoldCrease? {
-        #if compiler(>=6.4)
+        #if DUO_SDK
         if #available(iOS 27.1, *) {
             let regions = proxy.reservedRegions(kind: .division, options: .includeInactive)
             // A single fold today; if a device ever reports two, the widest
@@ -182,7 +188,7 @@ private extension View {
     /// Subscribes to hinge updates where the SDK has them; a no-op otherwise.
     @ViewBuilder
     func trackingHinge(_ onChange: @escaping (Double?, Bool) -> Void) -> some View {
-        #if compiler(>=6.4)
+        #if DUO_SDK
         if #available(iOS 27.1, *) {
             self.onHingeChange { _, context in
                 guard let hinge = context.hinge else {
