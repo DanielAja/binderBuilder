@@ -24,6 +24,9 @@ import simd
 struct SceneBootstrapResult {
     let root: Entity
     let cameraRig: CameraRig
+    /// The open binder's entities, so the view layer can dress it for the
+    /// device's fold (BinderStage.dressing -> BinderBuilder3D.setGutter).
+    let binderRig: BinderRig
     let controller: BinderFlipController?
     let router: GestureRouter?
     /// Card pull-out / inspect / return interaction (tap + arcball drag).
@@ -240,6 +243,7 @@ enum SceneBootstrap {
         return SceneBootstrapResult(
             root: root,
             cameraRig: cameraRig,
+            binderRig: rig,
             controller: controller,
             router: router,
             cardInteraction: cardInteraction,

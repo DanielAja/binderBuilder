@@ -8,8 +8,15 @@ tracks what you own, what it's worth, and who you're trading it to.
 ## Features
 
 - **3D page-flipping binder** — a real page-curl animation (custom Metal
-  shaders), holo foil that reacts to device tilt, and a pull-to-inspect
-  floating card with haptics.
+  shaders), holo foil that reacts to device tilt, a three-ring mechanism that
+  sizes itself to how fat the binder is, and a pull-to-inspect floating card
+  with haptics.
+- **Built for the iPhone Duo** — opened out, the binder fills the whole inner
+  display with its spine parked on the crease; fold it into book pose and the
+  camera swings overhead so each page sits square-on to its own panel, with
+  the device's own hinge acting as the binder's spine. Tabletop pose puts the
+  binder on the upright panel and the controls on the flat one, and the outer
+  display shows one page at a time. See "Folding devices" below.
 - **Collection & wishlist tracking** — per-copy tracking with condition and
   grade, set-completion progress, groups, and a wishlist with target prices.
 - **Live prices** — current market prices pulled from
@@ -56,6 +63,39 @@ tools/verify.sh screenshot /tmp/shot.png   # install, launch, and screenshot
 All three target an iOS Simulator device named `Shots-iPhone16ProMax` by
 default; override with the `SIM_NAME` environment variable.
 
+## Folding devices
+
+The iPhone Duo adaptation lives in `binderBuilder/Fold/` and
+`Scene3D/BinderStage.swift`:
+
+- `FoldReader.swift` is the only file that touches the iOS 27.1 APIs —
+  `.onHingeChange` for the live hinge angle and
+  `GeometryProxy.reservedRegions(kind: .division)` for the crease. It
+  publishes a plain `FoldState` value through `@Environment(\.fold)`.
+- `FoldState.swift` derives the pose (flat / book / tabletop / compact) and
+  the screen geometry from those two inputs. No device is hardcoded: an
+  off-centre crease or a different panel split falls out of the reserved
+  region the system reports.
+- `BinderStage.swift` turns that into a camera stage and the binder's own
+  dressing. Everything is driven by the hinge *angle*, not by a pose
+  threshold, so the scene settles into place while you fold rather than
+  snapping.
+
+The Duo symbols sit behind `#if compiler(>=6.4)` (Xcode 27.1) as well as
+`@available(iOS 27.1, *)`, so the app still builds with an older toolchain —
+it just reports every device as non-folding, which is the pre-existing
+behaviour.
+
+To exercise the fold layouts on an ordinary simulator, pass `-fold` and
+optionally `-hinge`:
+
+```sh
+tools/verify.sh screenshot /tmp/book.png -uiState binderOpen -fold book -hinge 115
+tools/verify.sh screenshot /tmp/flat.png -uiState binderOpen -fold flat
+tools/verify.sh screenshot /tmp/table.png -uiState binderOpen -fold tabletop
+tools/verify.sh screenshot /tmp/cover.png -uiState binderOpen -fold compact
+```
+
 ## Architecture
 
 The app is SwiftUI on top of a RealityKit 3D scene (`Scene3D/`): a
@@ -68,7 +108,8 @@ trades, and price alerts, plus a bundled read-only card catalog
 (`binderBuilder/Resources/catalog.sqlite`) built from the free TCGdex API by
 `tools/build_catalog.py`. `Catalog/`, `Collection/`, `Pricing/`, `Trade/`,
 `Scanner/`, and `Sync/` provide the data and services layer; `UI/` is the
-SwiftUI presentation layer.
+SwiftUI presentation layer, and `Fold/` publishes the device's fold so both
+the 3D scene and the SwiftUI chrome can lay themselves out around the crease.
 
 See `tools/README.md` for details on rebuilding the catalog and the test
 fixture.
