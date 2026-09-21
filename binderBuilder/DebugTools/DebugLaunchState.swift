@@ -14,6 +14,8 @@
 //    -simulatedMotion                           force SimulatedMotionProvider (default on simulator)
 //    -tilt <pitch,roll>                         initial simulated tilt in radians
 //    -deformer <gpu|cpu>                        select PageDeformer implementation
+//    -fold <flat|book|tabletop|compact>         simulate an iPhone Duo pose on any device
+//    -hinge <degrees>                           simulated hinge angle (180 = flat)
 //
 
 import Foundation
@@ -35,6 +37,11 @@ nonisolated struct DebugLaunchState {
     let simulatedMotion: Bool
     let tilt: SIMD2<Float>?
     let deformer: Deformer?
+    /// Pretends the device folds, so the Duo layouts can be driven (and
+    /// screenshot) on a plain simulator. `nil` means "believe the hardware".
+    let foldPose: FoldPose?
+    /// Hinge angle to feed the simulated pose; defaults per pose when absent.
+    let hingeDegrees: Double?
 
     static let current = DebugLaunchState(arguments: launchArguments)
 
@@ -85,5 +92,7 @@ nonisolated struct DebugLaunchState {
         #endif
         tilt = float2(after: "-tilt")
         deformer = value(after: "-deformer").flatMap(Deformer.init(rawValue:))
+        foldPose = value(after: "-fold").flatMap(FoldPose.init(rawValue:))
+        hingeDegrees = value(after: "-hinge").flatMap(Double.init).map { min(max($0, 0), 180) }
     }
 }

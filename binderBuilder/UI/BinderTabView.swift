@@ -11,6 +11,7 @@ import SwiftUI
 
 struct BinderTabView: View {
     let env: AppEnvironment
+    @Environment(\.fold) private var fold
     @State private var showGrid = false
 
     init(env: AppEnvironment) {
@@ -39,6 +40,10 @@ struct BinderTabView: View {
 
     /// The 3D-side switch, floating center-top between the scene's Shelf and
     /// Edit buttons. (The grid side renders its twin in the toolbar.)
+    ///
+    /// Screen-centre is the crease in book pose, and a segmented control
+    /// folded down the middle is unusable, so it steps onto the leading panel
+    /// — the opposite side from the scene's bottom controls.
     @ViewBuilder
     private var floatingToggle: some View {
         if env.openBinderID != nil {
@@ -51,6 +56,10 @@ struct BinderTabView: View {
             .padding(4)
             .floatingGlass()
             .padding(.top, 8)
+            .offset(x: fold.leadingPanelCenterOffset)
+            .animation(
+                .spring(response: 0.45, dampingFraction: 0.85),
+                value: fold.leadingPanelCenterOffset)
             .accessibilityLabel("Binder view style")
         }
     }

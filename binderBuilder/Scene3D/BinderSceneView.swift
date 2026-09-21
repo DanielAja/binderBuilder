@@ -18,12 +18,24 @@
 //  one goes straight to the card picker. Card pull-out is suppressed while it
 //  is on, so a tap is never ambiguous; page flips keep working.
 //
+//  FOLD. On a folding device the scene is staged around the crease rather
+//  than around the screen: the binder's spine goes where the hardware bends,
+//  the camera swings overhead as the hinge closes so each page ends up
+//  square-on to its own panel, and the floating controls step off the fold.
+//  The policy lives in BinderStage; this view reads the crease from its own
+//  geometry proxy (crease rects are per-coordinate-space) and applies it.
+//
 
 import RealityKit
 import SwiftUI
 
 struct BinderSceneView: View {
     let env: AppEnvironment
+    /// Device-wide fold (hinge angle, whether we're on the outer display).
+    @Environment(\.fold) private var fold
+    /// The fold as measured in the scene's own coordinate space — this is
+    /// the one the camera and the controls are laid out against.
+    @State private var sceneFold = FoldState.none
     @State private var model: SceneModel
     @State private var sceneMode: AppMode
     /// Mirrors the floating card's ref so the toggle bar shows/hides.
@@ -186,16 +198,18 @@ struct BinderSceneView: View {
 
     private var sceneLayer: some View {
         GeometryReader { proxy in
+            // Crease rects are only meaningful in the proxy that reported
+            // them, so the scene reads its own rather than the root's.
+            let localFold = FoldSupport.fold(in: proxy, hinge: fold)
             RealityView { content in
                 content.camera = .virtual
                 content.add(model.result.root)
             }
-            // Framings are solved for the live viewport aspect: snap on first
-            // layout, dolly on later changes (rotation, iPad multitasking).
-            .onAppear { model.result.cameraRig.setViewport(proxy.size, animated: false) }
-            .onChange(of: proxy.size) { _, size in
-                model.result.cameraRig.setViewport(size, animated: true)
-            }
+            // The stage is solved for the live viewport AND the fold: snap on
+            // first layout, dolly on later changes (rotation, iPad
+            // multitasking, and the hinge opening or closing).
+            .onAppear { applyStage(localFold, animated: false) }
+            .onChange(of: localFold) { _, new in applyStage(new, animated: true) }
             .gesture(
                 // >0 minimum so a tap never starts a drag; the tap gesture owns
                 // open/pull-out/return. Shelf: drag orbits the camera. Binder:
@@ -255,7 +269,33 @@ struct BinderSceneView: View {
         }
     }
 
+    /// Stages the camera and dresses the binder for the fold we're in.
+    /// Everything fold-dependent funnels through here, so there is exactly
+    /// one place that decides how the scene answers the hinge.
+    private func applyStage(_ newFold: FoldState, animated: Bool) {
+        guard newFold.viewport.width > 0, newFold.viewport.height > 0 else { return }
+        sceneFold = newFold
+        model.result.cameraRig.setStage(
+            BinderStage.stage(fold: newFold, viewport: newFold.viewport), animated: animated)
+        let dressing = BinderStage.dressing(fold: newFold)
+        BinderBuilder3D.setGutter(
+            rig: model.result.binderRig,
+            depth: dressing.gutterDepth,
+            width: dressing.gutterWidth
+        )
+    }
+
     // MARK: Controls (safe area)
+
+    /// Bottom controls sit on a panel, never on the crease: in book pose they
+    /// slide onto the trailing panel, and in tabletop pose they drop onto the
+    /// flat lower one, which is the half your hands are resting on anyway.
+    private var bottomControlOffset: CGFloat { sceneFold.trailingPanelCenterOffset }
+
+    private var bottomControlInset: CGFloat {
+        guard let tray = sceneFold.trayRect else { return 16 }
+        return max(16, tray.height / 2 - 26)
+    }
 
     private var controlsLayer: some View {
         VStack(spacing: 0) {
@@ -270,21 +310,25 @@ struct BinderSceneView: View {
                 }
             }
             Spacer()
-            if editMode {
-                VStack(spacing: 10) {
-                    pageEditBar
-                    editHint
+            Group {
+                if editMode {
+                    VStack(spacing: 10) {
+                        pageEditBar
+                        editHint
+                    }
+                } else if binderNeedsPages {
+                    addPagesCTA
+                } else {
+                    ownedToggleBar
                 }
-            } else if binderNeedsPages {
-                addPagesCTA
-            } else {
-                ownedToggleBar
             }
+            .offset(x: bottomControlOffset)
+            .animation(.spring(response: 0.45, dampingFraction: 0.85), value: bottomControlOffset)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, 16)
         .padding(.top, 8)
-        .padding(.bottom, 16)
+        .padding(.bottom, bottomControlInset)
     }
 
     private var shelfButton: some View {

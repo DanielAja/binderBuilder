@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var env = AppEnvironment()
     @State private var showingOnboarding = false
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.fold) private var fold
 
     var body: some View {
         ZStack {
@@ -67,6 +68,13 @@ struct ContentView: View {
         return true
     }
 
+    /// Width of the panel the error banner is confined to in book pose;
+    /// `nil` (unconstrained, full width) everywhere else.
+    private var bannerPanelWidth: CGFloat? {
+        guard fold.pose == .book, fold.viewport.width > 0 else { return nil }
+        return max(200, fold.creaseFraction * fold.viewport.width - 32)
+    }
+
     @ViewBuilder private var errorBanner: some View {
         if let banner = env.errors.banner {
             Text(banner.message)
@@ -78,6 +86,10 @@ struct ContentView: View {
                 .background(banner.isError ? Color.red : Color.accentColor,
                             in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .shadow(radius: 8, y: 2)
+                // In book pose a full-width banner would be creased down the
+                // middle, so it sits on the leading panel instead.
+                .frame(maxWidth: bannerPanelWidth)
+                .offset(x: fold.leadingPanelCenterOffset)
                 .padding(.horizontal)
                 .padding(.top, 8)
                 .transition(.move(edge: .top).combined(with: .opacity))
