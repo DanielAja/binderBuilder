@@ -183,4 +183,38 @@ import Testing
         #expect(world.model.removePage(at: 0))
         #expect(world.model.binder?.pageCount == 2)
     }
+
+    @Test func anEditFromElsewhereDropsTheUndoStack() async throws {
+        // The grid stays mounted while the binder is edited from the detail
+        // view, the 3D pocket editor or a scan. Restoring a snapshot taken
+        // before one of those would either strand rows past the last sheet or
+        // silently revert the other edit, so the stack has to go.
+        let world = try makeWorld(pageCount: 2)
+        await world.model.reload()
+        #expect(world.model.fill(loc(world, 0), with: a))
+        #expect(world.model.canUndo)
+
+        // Someone else shrinks the binder, then the grid catches up.
+        #expect(world.binders.removePage(at: 1, from: world.binder.id))
+        await world.model.reloadIfNeeded()
+
+        #expect(!world.model.canUndo)
+        #expect(!world.model.undo())
+    }
+
+    @Test func aChangeLandingMidReloadIsNotLost() async throws {
+        // reload() awaits per spread. A second edit arriving during that window
+        // used to be dropped AND have the older token stamped as loaded, so the
+        // grid sat on stale content that nothing would ever correct.
+        let world = try makeWorld(pageCount: 2)
+        await world.model.reload()
+
+        async let first: Void = world.model.reload()
+        place(world, 0, a)
+        async let second: Void = world.model.reload()
+        _ = await (first, second)
+
+        #expect(world.model.loadedToken == world.binders.changeToken)
+        #expect(world.model.pages.first?.slots.first??.card.id == a.cardID)
+    }
 }

@@ -34,6 +34,9 @@ final class SceneModeController {
 
     var isShelf: Bool { mode == .shelf }
 
+    /// Bumped per crossfade so a superseded transition's cleanup stands down.
+    private var transitionGeneration = 0
+
     // Shelf orbit state (committed) + the values captured at pan-start.
     private var shelfYaw: Float = 0
     private var shelfPitch: Float = 0
@@ -80,6 +83,8 @@ final class SceneModeController {
     /// the camera dolly — replaces the old hard isEnabled cut. Falls back to
     /// the cut if the opacity animation can't be built.
     private func crossfade(hide: Entity, show: Entity, duration: TimeInterval = 0.35) {
+        transitionGeneration += 1
+        let generation = transitionGeneration
         show.isEnabled = true
         let fadeIn = FromToByAnimation<Float>(
             from: 0, to: 1, duration: duration, timing: .easeInOut, bindTarget: .opacity)
@@ -90,6 +95,10 @@ final class SceneModeController {
             hide.isEnabled = false
             return
         }
+        // A transition can start while the previous one is still fading; its
+        // leftover animation would fight the new one on the same root.
+        show.stopAllAnimations()
+        hide.stopAllAnimations()
         show.components.set(OpacityComponent(opacity: 0))
         hide.components.set(OpacityComponent(opacity: 1))
         show.playAnimation(inResource)
@@ -100,6 +109,10 @@ final class SceneModeController {
             if (hide === shelfRoot && mode != .shelf) || (hide === binderRoot && mode == .shelf) {
                 hide.isEnabled = false
             }
+            // Stripping the opacity components belongs to whichever transition
+            // is current: doing it from a superseded one snaps the root that is
+            // mid-fade back to fully opaque, and both roots then overlap.
+            guard generation == transitionGeneration else { return }
             hide.components.remove(OpacityComponent.self)
             show.components.remove(OpacityComponent.self)
         }

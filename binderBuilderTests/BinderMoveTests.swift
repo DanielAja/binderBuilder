@@ -219,4 +219,17 @@ import Testing
         #expect(stores.binders.changeToken == token)
         #expect(byOrdinal(stores.binders, binder.id) == [0: a])
     }
+
+    @Test func pagelessBinderRefusesMovesInsteadOfTrapping() throws {
+        // A 0-sheet binder has no addressable pockets, so the ordinal range is
+        // `0...(-1)` — a malformed ClosedRange aborts the process rather than
+        // being empty. Every other rejection here returns nil, and so must this.
+        let stores = try makeStores()
+        let binder = try #require(
+            stores.binders.createBinder(name: "Empty", coverColor: "#111111", pageCount: 0))
+        #expect(stores.binders.moveCard(
+            from: loc(binder.id, 0), to: loc(binder.id, 1), mode: .swap) == nil)
+        #expect(stores.binders.moveCard(
+            from: loc(binder.id, 0), to: loc(binder.id, 1), mode: .insertShift) == nil)
+    }
 }

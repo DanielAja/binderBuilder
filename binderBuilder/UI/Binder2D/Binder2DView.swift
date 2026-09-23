@@ -259,11 +259,11 @@ struct Binder2DView: View {
             .accessibilityLabel(pocketLabel(page: page, index: index, content: content))
 
         if arrangeMode {
-            cell
-                .onDrag {
-                    dragSourceOrdinal = ordinal
-                    return NSItemProvider(object: "\(ordinal)" as NSString)
-                }
+            // Every pocket is a drop target, but only an occupied one is a drag
+            // source: dragging an empty pocket has nothing to move, so it can
+            // only end in "Couldn't move that card" for a gesture the UI itself
+            // invited.
+            let droppable = cell
                 .onDrop(of: [.plainText], delegate: PocketDropDelegate(
                     target: ordinal,
                     dragSourceOrdinal: $dragSourceOrdinal,
@@ -272,6 +272,14 @@ struct Binder2DView: View {
                     basePages: { model.pages },
                     mode: { moveMode },
                     commit: { source, target in commitDrag(from: source, to: target) }))
+            if content == nil {
+                droppable
+            } else {
+                droppable.onDrag {
+                    dragSourceOrdinal = ordinal
+                    return NSItemProvider(object: "\(ordinal)" as NSString)
+                }
+            }
         } else {
             Button {
                 handleTap(location, content: content)

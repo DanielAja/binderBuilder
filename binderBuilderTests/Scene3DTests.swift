@@ -8,6 +8,7 @@
 //
 
 import CoreGraphics
+import RealityKit
 import Testing
 import simd
 @testable import binderBuilder
@@ -313,5 +314,142 @@ struct CameraFramingTests {
         let wide = distance(framing, aspect: 0.7)
         let narrow = distance(framing, aspect: 0.35)
         #expect(abs(narrow - 2 * wide) < 1e-3)
+    }
+}
+
+/// Pinch zoom: the camera dollies along the framing's own eye direction, so
+/// the tuned angle survives; scene changes drop it; the orbit rides along.
+@MainActor
+struct CameraZoomTests {
+    /// Distance from the framing's focus to the camera's current position.
+    private func eyeDistance(_ rig: CameraRig, _ framing: CameraRig.Framing) -> Float {
+        simd_length(rig.camera.position(relativeTo: rig.root) - framing.at)
+    }
+
+    @Test func startsUnzoomed() {
+        #expect(CameraRig().zoom == 1)
+    }
+
+    @Test func pinchingInHalvesTheDistanceAndKeepsTheAngle() {
+        let rig = CameraRig()
+        let before = rig.eye(for: .binderOpen)
+        let baseDistance = eyeDistance(rig, .binderOpen)
+
+        rig.beginZoom()
+        rig.updateZoom(magnification: 2)
+
+        #expect(abs(rig.zoom - 2) < 1e-5)
+        #expect(abs(eyeDistance(rig, .binderOpen) - baseDistance / 2) < 1e-4)
+        // Same direction from the subject — only the dolly moved.
+        let after = rig.eye(for: .binderOpen)
+        let dot = simd_dot(
+            simd_normalize(before - CameraRig.Framing.binderOpen.at),
+            simd_normalize(after - CameraRig.Framing.binderOpen.at))
+        #expect(abs(dot - 1) < 1e-5)
+    }
+
+    @Test func zoomIsClampedBothWays() {
+        let rig = CameraRig()
+        rig.beginZoom()
+        rig.updateZoom(magnification: 100)
+        #expect(rig.zoom == CameraRig.zoomRange.upperBound)
+        rig.endZoom()
+
+        rig.beginZoom()
+        rig.updateZoom(magnification: 0.001)
+        #expect(rig.zoom == CameraRig.zoomRange.lowerBound)
+    }
+
+    @Test func magnificationIsAbsoluteWithinAPinchAndCompoundsAcrossThem() {
+        let rig = CameraRig()
+        rig.beginZoom()
+        rig.updateZoom(magnification: 1.5)
+        // Still the same pinch: 1.2 replaces 1.5, it doesn't stack onto it.
+        rig.updateZoom(magnification: 1.2)
+        #expect(abs(rig.zoom - 1.2) < 1e-5)
+        rig.endZoom()
+
+        // A second pinch starts from where the first one landed.
+        rig.beginZoom()
+        rig.updateZoom(magnification: 1.5)
+        #expect(abs(rig.zoom - 1.8) < 1e-5)
+    }
+
+    @Test func nonFiniteMagnificationIsIgnored() {
+        let rig = CameraRig()
+        rig.beginZoom()
+        rig.updateZoom(magnification: 1.4)
+        rig.updateZoom(magnification: .nan)
+        #expect(abs(rig.zoom - 1.4) < 1e-5)
+    }
+
+    @Test func resetReturnsToTheSolvedFraming() {
+        let rig = CameraRig()
+        let baseDistance = eyeDistance(rig, .binderOpen)
+        rig.beginZoom()
+        rig.updateZoom(magnification: 2)
+        rig.endZoom()
+
+        rig.resetZoom(animated: false)
+
+        #expect(rig.zoom == 1)
+        #expect(abs(eyeDistance(rig, .binderOpen) - baseDistance) < 1e-4)
+    }
+
+    @Test func changingSceneDropsTheZoom() {
+        let rig = CameraRig()
+        rig.beginZoom()
+        rig.updateZoom(magnification: 2)
+        rig.endZoom()
+
+        rig.apply(.shelf)
+
+        // A binder crop must not become the shelf's opening shot.
+        #expect(rig.zoom == 1)
+        #expect(abs(eyeDistance(rig, .shelf) - simd_length(rig.eye(for: .shelf) - CameraRig.Framing.shelf.at)) < 1e-4)
+    }
+
+    @Test func reApplyingTheSameFramingKeepsTheZoom() {
+        let rig = CameraRig()
+        rig.beginZoom()
+        rig.updateZoom(magnification: 1.7)
+        rig.endZoom()
+
+        // What a resize does — re-solve, same scene.
+        rig.setViewport(CGSize(width: 820, height: 1180), animated: false)
+
+        #expect(abs(rig.zoom - 1.7) < 1e-5)
+    }
+
+    @Test func zoomRidesTheShelfOrbit() {
+        let rig = CameraRig()
+        rig.apply(.shelf)
+        rig.setShelfOrbit(yaw: 0.5, pitch: 0.2)
+        let orbited = rig.camera.position(relativeTo: rig.root)
+
+        rig.beginZoom()
+        rig.updateZoom(magnification: 2)
+        let zoomed = rig.camera.position(relativeTo: rig.root)
+
+        let at = CameraRig.Framing.shelf.at
+        // Half the distance, along the very same orbited direction.
+        #expect(abs(simd_length(zoomed - at) - simd_length(orbited - at) / 2) < 1e-4)
+        let dot = simd_dot(simd_normalize(orbited - at), simd_normalize(zoomed - at))
+        #expect(abs(dot - 1) < 1e-5)
+    }
+
+    @Test func leavingTheShelfClearsTheOrbitToo() {
+        let rig = CameraRig()
+        rig.apply(.shelf)
+        rig.setShelfOrbit(yaw: 0.8, pitch: 0.3)
+
+        rig.apply(.binderOpen)
+        // Back on the shelf, the stale orbit must not reappear on a resize —
+        // the mode controller has already zeroed its own copy.
+        rig.apply(.shelf)
+        rig.setViewport(CGSize(width: 400, height: 900), animated: false)
+
+        let expected = rig.eye(for: .shelf)
+        #expect(simd_length(rig.camera.position(relativeTo: rig.root) - expected) < 1e-4)
     }
 }

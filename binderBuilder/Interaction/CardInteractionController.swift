@@ -280,9 +280,16 @@ final class CardInteractionController {
         return best?.card
     }
 
+    /// Cards that are actually on screen. The `isEnabled` gate is load-bearing,
+    /// not a micro-optimisation: the shelf's display-case cards carry
+    /// CardSlotComponent too and sit at the same world origin as the open
+    /// binder, closer to the camera than the pages. Without it, a tap in the
+    /// upper-left of the open binder picks an invisible shelf card and pulls it
+    /// into the user's face. (PocketPicker.livePages does the same.)
     private func collectCards() -> [ModelEntity] {
         var out: [ModelEntity] = []
         func walk(_ entity: Entity) {
+            guard entity.isEnabled else { return }
             if entity.components.has(CardSlotComponent.self), let model = entity as? ModelEntity {
                 out.append(model)
             }

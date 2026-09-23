@@ -151,5 +151,37 @@ import Testing
         let list2 = TradeListStore(database: user)
         await list2.load()
         #expect(list2.listings.isEmpty)
+
+        // No v4 slot count in a v2 payload: keep whatever this install has,
+        // rather than resetting the shelf to the migration default.
+        let shelf = try await user.queue.read { db in
+            try Int.fetchOne(db, sql: "SELECT display_slot_count FROM shelf_config WHERE id = 0")
+        }
+        #expect(shelf == 3)
+    }
+
+    @Test func displaySlotCountSurvivesTheRoundTripSoDisplayCardsDoNotVanish() async throws {
+        let user = try UserDatabase.inMemory()
+        let binders = BinderStore(database: user, catalog: nil, isOwned: { _ in false })
+        await binders.load()
+
+        // Grow the case past the default 3 and put a card in the last slot.
+        #expect(binders.setDisplayCaseCount(5))
+        let rare = CardRef(cardID: "base1-4", variant: .holo)
+        binders.setDisplayCase(rare, at: 4)
+
+        let data = try BackupService.export(user)
+        try await user.queue.write { db in
+            for t in ["display_case"] { try db.execute(sql: "DELETE FROM \(t)") }
+            try db.execute(sql: "UPDATE shelf_config SET display_slot_count = 3 WHERE id = 0")
+        }
+        try BackupService.restore(data, into: user)
+
+        // Without the slot count, load() clamps to 3 and drops slot 4 entirely.
+        let restored = BinderStore(database: user, catalog: nil, isOwned: { _ in false })
+        await restored.load()
+        #expect(restored.displayCaseCount == 5)
+        #expect(restored.displayCase.count == 5)
+        #expect(restored.displayCase[4] == rare)
     }
 }

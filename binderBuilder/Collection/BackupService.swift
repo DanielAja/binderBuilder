@@ -43,7 +43,7 @@ struct BackupData: Codable {
         var valueMode: String; var valueAmount: Double?; var note: String?; var addedAt: Double
     }
 
-    var version = 3
+    var version = 4
     var copies: [Copy] = []
     var wishes: [Wish] = []
     var binders: [Binder] = []
@@ -58,6 +58,11 @@ struct BackupData: Codable {
     var trades: [Trade]?
     var tradeItems: [TradeItem]?
     var listings: [Listing]?
+    // v4: how many display slots the shelf has. Without it a restore leaves
+    // shelf_config at the migration default of 3, and BinderStore.load clamps
+    // every display_case row past position 2 away — cards the backup faithfully
+    // carried, silently dropped. Optional for the same reason as `trades`.
+    var displaySlotCount: Int?
 }
 
 enum BackupService {
@@ -113,6 +118,8 @@ enum BackupService {
                       quantity: $0["quantity"] as Int? ?? 1, valueMode: $0["value_mode"] as String? ?? "market",
                       valueAmount: $0["value_amount"], note: $0["note"], addedAt: $0["added_at"] as Double? ?? 0)
             }
+            out.displaySlotCount = try Int.fetchOne(
+                db, sql: "SELECT display_slot_count FROM shelf_config WHERE id = 0")
             return out
         }
         let encoder = JSONEncoder()
@@ -156,6 +163,14 @@ enum BackupService {
                 try db.execute(
                     sql: "INSERT INTO slot_assignment (binder_id, page_index, side, slot_index, card_id, variant) VALUES (?,?,?,?,?,?)",
                     arguments: [s.binderID, s.pageIndex, s.side, s.slotIndex, s.cardID, s.variant])
+            }
+            // Slot count before the rows, so nothing is restored into a case
+            // that is still at the default size. A v3-and-earlier payload has
+            // no count: keep whatever this install already had.
+            if let count = backup.displaySlotCount {
+                try db.execute(
+                    sql: "UPDATE shelf_config SET display_slot_count = ? WHERE id = 0",
+                    arguments: [count])
             }
             for d in backup.displays {
                 try db.execute(sql: "INSERT INTO display_case (position, card_id, variant) VALUES (?,?,?)",
