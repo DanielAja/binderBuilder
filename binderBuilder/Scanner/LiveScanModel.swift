@@ -99,7 +99,10 @@ import UIKit
         guard let matcher else { return }
         // A chosen photo isn't the preview, so the crop uses frame limits only.
         let matches = await Self.matches(in: frame, viewSize: .zero, using: matcher)
-        guard let top = matches.first, top.confidence >= 0.5 else {
+        // Same floor as the live stream. This used to be 0.5 (32 bits — a coin
+        // flip, so it accepted whatever card happened to be nearest) because
+        // the upside-down dHash put even correct matches ~25 bits away.
+        guard let top = matches.first, top.confidence >= ScanStabilizer.defaultMinConfidence else {
             lastActionText = "No card recognized — try a clearer photo."
             clearActionSoon()
             return

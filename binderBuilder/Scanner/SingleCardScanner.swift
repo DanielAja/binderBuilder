@@ -120,7 +120,11 @@ struct ScanStabilizer: Sendable {
     private var streak: Int = 0
     private(set) var locked: String?
 
-    init(minConfidence: Double = 0.70, requiredStreak: Int = 3) {
+    /// ≤19 of 64 bits off. With the dHash rows in the right order a real
+    /// card lands ~9 bits from its stored hash, comfortably inside this.
+    nonisolated static let defaultMinConfidence = 0.70
+
+    init(minConfidence: Double = ScanStabilizer.defaultMinConfidence, requiredStreak: Int = 3) {
         self.minConfidence = minConfidence
         self.requiredStreak = requiredStreak
     }
