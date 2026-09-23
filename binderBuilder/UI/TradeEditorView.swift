@@ -218,8 +218,9 @@ struct TradeEditorView: View {
             for _ in 0..<item.quantity { env.collection.addCopy(item.ref, condition: item.condition) }
         }
         for item in trade.outgoing {
-            let current = env.collection.quantity(of: item.ref)
-            env.collection.setOwned(item.ref, quantity: max(0, current - item.quantity))
+            // Hand over copies matching the line's condition, raw before
+            // graded — not whichever raw copies happen to be the worst.
+            env.collection.removeTradedCopies(of: item.ref, condition: item.condition, count: item.quantity)
         }
     }
 }

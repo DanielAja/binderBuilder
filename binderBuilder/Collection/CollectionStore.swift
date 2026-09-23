@@ -167,6 +167,39 @@ import os
         return graded > 0 ? "\(base) (\(graded) graded)" : base
     }
 
+    // MARK: - Trading copies away
+
+    /// Which owned copies an outgoing trade line hands over. The trade UI
+    /// records a condition but not a specific copy, so: raw before graded (a
+    /// slab is never traded away as a raw line), then the requested condition,
+    /// then the nearest condition, oldest first. The old path — a quantity
+    /// decrement — removed the *worst* raw copies whatever the trade said.
+    nonisolated static func copiesToTrade(
+        from copies: [CardCopy], condition: CardCondition, count: Int
+    ) -> [CardCopy] {
+        guard count > 0 else { return [] }
+        let ladder: [CardCondition] = [.nm, .lp, .mp, .hp, .dmg]
+        func distance(_ c: CardCondition) -> Int {
+            abs((ladder.firstIndex(of: c) ?? 0) - (ladder.firstIndex(of: condition) ?? 0))
+        }
+        return copies
+            .sorted { a, b in
+                if a.isGraded != b.isGraded { return !a.isGraded }
+                let da = distance(a.condition), db = distance(b.condition)
+                if da != db { return da < db }
+                return a.acquiredAt < b.acquiredAt
+            }
+            .prefix(count)
+            .map { $0 }
+    }
+
+    /// Removes the copies an outgoing trade line hands over (see copiesToTrade).
+    func removeTradedCopies(of ref: CardRef, condition: CardCondition, count: Int) {
+        for copy in Self.copiesToTrade(from: copies(of: ref), condition: condition, count: count) {
+            removeCopy(copy.id)
+        }
+    }
+
     // MARK: - Helpers
 
     private func removeAllCopies(of ref: CardRef) {
