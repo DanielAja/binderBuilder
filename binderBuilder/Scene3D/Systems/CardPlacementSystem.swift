@@ -107,7 +107,10 @@ final class CardPlacement {
     }
 
     private func clearCards(on page: ModelEntity) {
-        for child in page.children where child.components.has(CardSlotComponent.self) {
+        // Snapshot first: `children` is a live view, so removing mid-iteration
+        // skips every entity that shifts down into a vacated index and leaves
+        // half the cards attached to the pooled page.
+        for child in Array(page.children) where child.components.has(CardSlotComponent.self) {
             child.removeFromParent()
         }
     }

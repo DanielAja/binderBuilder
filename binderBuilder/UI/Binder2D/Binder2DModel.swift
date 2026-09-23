@@ -36,6 +36,13 @@ import Observation
     private static let undoDepth = 10
     var canUndo: Bool { !undoStack.isEmpty }
 
+    /// The store token this model last produced itself. Anything else means
+    /// the binder was changed somewhere we don't control — the detail view's
+    /// page stepper, the 3D pocket editor, a scan, a sort from the manager —
+    /// and our snapshots no longer describe the same binder. See
+    /// `dropUndoIfChangedElsewhere`.
+    private var ownToken = -1
+
     var binder: Binder? { store.binders.first(where: { $0.id == binderID }) }
 
     init(store: BinderStore, binderID: String) {
@@ -47,13 +54,45 @@ import Observation
 
     func reloadIfNeeded() async {
         guard store.changeToken != loadedToken else { return }
+        dropUndoIfChangedElsewhere()
         await reload()
     }
 
+    /// Undo restores a whole-binder assignment snapshot, so it is only
+    /// meaningful while this model is the only thing editing the binder. The
+    /// moment someone else writes — the detail view's page stepper, the 3D
+    /// pocket editor, a scan, a sort from the manager — restoring would either
+    /// strand rows past the last sheet (invisible, but still shifted by later
+    /// page ops and resurrected when sheets are re-added) or silently revert
+    /// the other edit. Dropping the stack makes the button disappear, which is
+    /// the honest outcome.
+    private func dropUndoIfChangedElsewhere() {
+        guard store.changeToken != ownToken else { return }
+        undoStack.removeAll()
+    }
+
+    /// Records that the store's current state is one we produced.
+    private func claimCurrentToken() {
+        ownToken = store.changeToken
+    }
+
+    /// Reloads `pages` from the store, then reloads again if the store moved on
+    /// while the (awaited, per-spread) read was in flight.
+    ///
+    /// The re-check is what keeps a fast second edit from being lost: a naive
+    /// `guard !isLoading else { return }` drops the newer request on the floor
+    /// and then stamps `loadedToken` with the *older* token it captured, so the
+    /// grid sits on stale content that no later event will correct.
     func reload() async {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
+        repeat {
+            await loadOnce()
+        } while store.changeToken != loadedToken
+    }
+
+    private func loadOnce() async {
         let token = store.changeToken
         guard let binder else {
             pages = []
@@ -83,6 +122,7 @@ import Observation
     func fill(_ slot: SlotLocation, with ref: CardRef) -> Bool {
         snapshotForUndo()
         guard store.setSlot(ref, at: slot) else { discardLastUndo(); return false }
+        claimCurrentToken()
         return true
     }
 
@@ -90,6 +130,7 @@ import Observation
     func remove(at slot: SlotLocation) -> Bool {
         snapshotForUndo()
         guard store.clearSlot(slot) else { discardLastUndo(); return false }
+        claimCurrentToken()
         return true
     }
 
@@ -99,13 +140,16 @@ import Observation
             discardLastUndo()
             return nil
         }
+        claimCurrentToken()
         return result
     }
 
     @discardableResult
     func undo() -> Bool {
         guard let snapshot = undoStack.popLast() else { return false }
-        return store.restoreAssignments(snapshot, binderID: binderID)
+        guard store.restoreAssignments(snapshot, binderID: binderID) else { return false }
+        claimCurrentToken()
+        return true
     }
 
     // MARK: - Page ops
@@ -117,18 +161,21 @@ import Observation
     @discardableResult
     func addPage() -> Bool {
         undoStack.removeAll()
+        defer { claimCurrentToken() }
         return store.addPages(1, to: binderID)
     }
 
     @discardableResult
     func insertPage(at pageIndex: Int) -> Bool {
         undoStack.removeAll()
+        defer { claimCurrentToken() }
         return store.insertPage(at: pageIndex, in: binderID)
     }
 
     @discardableResult
     func removePage(at pageIndex: Int) -> Bool {
         undoStack.removeAll()
+        defer { claimCurrentToken() }
         return store.removePage(at: pageIndex, from: binderID)
     }
 

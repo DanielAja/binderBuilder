@@ -44,6 +44,15 @@ struct BinderSceneView: View {
     @State private var debugScan = false
     /// True while a shelf-pan drag is in progress.
     @State private var panActive = false
+    /// True while a pinch is in progress, so the one-finger drag handlers stand
+    /// down — SwiftUI still feeds a DragGesture from a two-finger pinch, and
+    /// without this a zoom would flip pages under the fingers.
+    @State private var zoomActive = false
+    /// Mirrors the rig's zoom so the reset control can appear when it matters.
+    @State private var zoomLevel: Float = 1
+    /// True from the shelf tap until the crossfade has hidden the shelf, so
+    /// nothing rebuilds the row out from under the pull-out animation.
+    @State private var openingFromShelf = false
 
     /// Pocket editing: taps address slots instead of cards.
     @State private var editMode = false
@@ -153,6 +162,9 @@ struct BinderSceneView: View {
         }
         .onChange(of: env.binders.binders) { refreshShelf() }
         .onChange(of: env.binders.displayCase) { refreshShelf() }
+        // Which binder is open decides which one stands face-out on the shelf
+        // (ShelfLayout.binderPlacements), so the row is stale until this fires.
+        .onChange(of: env.openBinderID) { refreshShelf() }
         .overlay {
             if exporter.isRunning {
                 ProgressView("Exporting…", value: exporter.progress)
@@ -174,6 +186,14 @@ struct BinderSceneView: View {
             reconcileContentIfStale()
             wireShelfCallbacks()
             refreshShelf()
+            // The scene (and its rig) outlives this view across tab switches.
+            zoomLevel = model.result.cameraRig.zoom
+            if let debugZoom = DebugLaunchState.current.zoom {
+                model.result.cameraRig.beginZoom()
+                model.result.cameraRig.updateZoom(magnification: CGFloat(debugZoom))
+                model.result.cameraRig.endZoom()
+                zoomLevel = model.result.cameraRig.zoom
+            }
             // Single source of truth for the owned-toggle bar: fires on every
             // pull/return, gesture-driven or programmatic (debug auto-pull
             // included), so the bar never needs bespoke bookkeeping per path.
@@ -216,6 +236,7 @@ struct BinderSceneView: View {
                 // drag flips a page or (while a card floats) spins it.
                 DragGesture(minimumDistance: 8)
                     .onChanged { value in
+                        if zoomActive { return }
                         if sceneMode == .shelf {
                             if !panActive { model.result.modeController?.beginShelfPan(); panActive = true }
                             model.result.modeController?.updateShelfPan(
@@ -237,6 +258,7 @@ struct BinderSceneView: View {
                         }
                     }
                     .onEnded { value in
+                        if zoomActive { return }
                         if sceneMode == .shelf { panActive = false; return }
                         let v = CGSize(width: value.velocity.width, height: value.velocity.height)
                         if model.result.cardInteraction?.isFloating == true {
@@ -249,8 +271,26 @@ struct BinderSceneView: View {
                     }
             )
             .simultaneousGesture(
+                // Pinch to zoom, in both scenes. The rig re-solves its framing
+                // distance, so the shelf orbit and the open binder's angle are
+                // preserved — only the dolly moves.
+                MagnifyGesture(minimumScaleDelta: 0.01)
+                    .onChanged { value in
+                        if !zoomActive { beginZoom(viewport: proxy.size) }
+                        model.result.cameraRig.updateZoom(magnification: value.magnification)
+                        zoomLevel = model.result.cameraRig.zoom
+                    }
+                    .onEnded { _ in
+                        model.result.cameraRig.endZoom()
+                        zoomLevel = model.result.cameraRig.zoom
+                        zoomActive = false
+                        Haptics.selection()
+                    }
+            )
+            .simultaneousGesture(
                 SpatialTapGesture()
                     .onEnded { value in
+                        if zoomActive { return }
                         if model.result.modeController?.isShelf == true {
                             let ray = model.result.cameraRig.ray(through: value.location, viewport: proxy.size)
                             model.result.modeController?.handleShelfTap(
@@ -285,6 +325,51 @@ struct BinderSceneView: View {
         )
     }
 
+    // MARK: Zoom
+
+    /// Starts a pinch. SwiftUI will usually have handed the pinch's first
+    /// finger to the DragGesture already, so settle whatever that started —
+    /// a page left half-curled while the camera dollies looks broken, and the
+    /// drag can't finish itself once `zoomActive` gates its callbacks.
+    private func beginZoom(viewport: CGSize) {
+        zoomActive = true
+        if sceneMode == .shelf {
+            panActive = false
+        } else if model.result.cardInteraction?.isFloating == true {
+            model.result.cardInteraction?.dragEnded(velocity: .zero, viewport: viewport)
+        } else {
+            model.result.router?.dragEnded(translation: .zero, velocity: .zero, viewport: viewport)
+        }
+        model.result.cameraRig.beginZoom()
+    }
+
+    /// Pinches that land within a couple of percent of 1x read as "not zoomed",
+    /// so the control neither flickers on nor lingers uselessly.
+    private var isZoomed: Bool { abs(zoomLevel - 1) > 0.02 }
+
+    /// Appears only once a pinch has moved the camera: pinching back to exactly
+    /// 1x by hand is fussy, and there is no other way home.
+    @ViewBuilder
+    private var zoomResetButton: some View {
+        if isZoomed {
+            Button {
+                model.result.cameraRig.resetZoom()
+                zoomLevel = 1
+                Haptics.impact(.soft)
+            } label: {
+                Label(String(format: "%.1f×", zoomLevel), systemImage: "arrow.up.left.and.down.right.magnifyingglass")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .floatingGlass()
+            }
+            .tint(.white)
+            .accessibilityLabel("Reset zoom")
+            .accessibilityValue(String(format: "%.1f times", zoomLevel))
+            .accessibilityHint("Returns the camera to its default framing")
+            .transition(.scale.combined(with: .opacity))
+        }
+    }
+
     // MARK: Controls (safe area)
 
     /// Bottom controls sit on a panel, never on the crease: in book pose they
@@ -310,6 +395,15 @@ struct BinderSceneView: View {
                 }
             }
             Spacer()
+            // Bottom-leading, not up top: the open binder's top row already
+            // carries Shelf, the 3D/Grid toggle, Share and Edit, and squeezing
+            // a fifth control in there collapses it to an unreadable sliver.
+            HStack {
+                zoomResetButton
+                Spacer()
+            }
+            .animation(.snappy(duration: 0.2), value: isZoomed)
+            .padding(.bottom, isZoomed ? 10 : 0)
             Group {
                 if editMode {
                     VStack(spacing: 10) {
@@ -340,6 +434,7 @@ struct BinderSceneView: View {
             sceneMode = .shelf
             floatingRef = nil
             setEditMode(false)
+            zoomLevel = model.result.cameraRig.zoom   // the rig drops zoom on a scene change
         } label: {
             Label("Shelf", systemImage: "books.vertical.fill")
                 .font(.subheadline.weight(.semibold))
@@ -538,11 +633,17 @@ struct BinderSceneView: View {
     /// Rebuilds the shelf's binder + display rows from the stores (cheap; the
     /// controller skips rebuilds when nothing changed).
     private func refreshShelf() {
-        guard let shelf = model.result.shelfController else { return }
+        // A rebuild replaces the very entity the pull-out is animating, which
+        // would snap it back mid-flight. The transition refreshes at its end.
+        guard !openingFromShelf, let shelf = model.result.shelfController else { return }
         shelf.refreshBinders(env.binders.binders, openBinderID: env.openBinderID)
+        // Ticket taken before the await, so a slow read can't overwrite a
+        // newer one that finished first.
+        let request = shelf.nextDisplayRequest()
         Task {
             let contents = await env.binders.displayCaseContents()
-            shelf.refreshDisplayCases(contents, maxCount: BinderStore.displayCaseMaxCount)
+            shelf.refreshDisplayCases(
+                contents, maxCount: BinderStore.displayCaseMaxCount, requestID: request)
         }
     }
 
@@ -569,6 +670,7 @@ struct BinderSceneView: View {
     private func openBinderFromShelf(_ binderID: String) {
         guard let modeController = model.result.modeController else { return }
         Haptics.impact(.medium)
+        openingFromShelf = true
         let entity = model.result.shelfController?.binderEntity(id: binderID)
         if let entity {
             var transform = entity.transform
@@ -587,9 +689,14 @@ struct BinderSceneView: View {
             }
             modeController.enterBinder()
             sceneMode = .binderOpen
-            // Put the pulled binder back once the crossfade has hidden the
-            // shelf, so returning shows it seated again.
+            zoomLevel = model.result.cameraRig.zoom   // the rig drops zoom on a scene change
+            // Once the crossfade has hidden the shelf, rebuild the row for the
+            // new open binder (it decides which one stands face-out) and put
+            // the pulled binder back — the reseat also covers re-opening the
+            // binder that was already open, where the row doesn't change.
             try? await Task.sleep(for: .milliseconds(450))
+            openingFromShelf = false
+            refreshShelf()
             model.result.shelfController?.resetBinderPose(id: binderID)
         }
     }

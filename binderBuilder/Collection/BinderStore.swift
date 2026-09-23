@@ -463,6 +463,9 @@ import os
     func moveCard(from: SlotLocation, to: SlotLocation, mode: SlotMoveMode) -> MoveResult? {
         guard from.binderID == to.binderID, from != to,
               let binder = binders.first(where: { $0.id == from.binderID }) else { return nil }
+        // A pageless binder has no addressable pockets at all; `0...maxOrdinal`
+        // would be a malformed range (trap), not an empty one.
+        guard binder.pageCount > 0 else { return nil }
         let maxOrdinal = binder.pageCount * Self.slotsPerSheet - 1
         let source = Self.ordinal(of: from)
         let target = Self.ordinal(of: to)

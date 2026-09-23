@@ -47,6 +47,13 @@ final class CameraRig {
     /// `nil` until a view reports one — tests and headless scenes keep the
     /// plain aspect-only framing.
     private(set) var stage: Stage?
+    /// Pinch zoom, as a multiple of the framing's solved distance: >1 moves the
+    /// camera closer (the subject looks bigger), <1 pulls it back. 1 is the
+    /// framing exactly as solved, which is what every non-pinch path uses.
+    private(set) var zoom: Float = 1
+    /// Zoom captured at pinch-start, so `updateZoom` can take the gesture's
+    /// absolute magnification instead of accumulating deltas.
+    private var zoomAtPinchStart: Float = 1
 
     init(fovDegrees: Float = 55) {
         self.fovDegrees = fovDegrees
@@ -183,15 +190,42 @@ final class CameraRig {
     /// shrinking the subject to a speck. At the tuning aspect neither binds.
     nonisolated static let distanceClamp: ClosedRange<Float> = 0.75...1.8
 
+    /// How far a pinch may push the solved distance. Tighter than it looks:
+    /// past 2.5x the card art runs out of texture, and below 0.75x the binder
+    /// is small enough that the shelf is the better view anyway.
+    nonisolated static let zoomRange: ClosedRange<Float> = 0.75...2.5
+
     /// Frames the open binder (lying at the origin, ~0.53 m wide) in portrait:
     /// camera above and in front, looking down at ~52 degrees.
     func applyBinderOpenFraming() {
         apply(.binderOpen)
     }
 
-    /// Snaps the camera to a framing immediately.
+    /// Snaps the camera to a framing immediately. Switching framings drops any
+    /// pinch zoom (see `setFraming`); re-applying the current one keeps it,
+    /// which is what makes this safe to call on resize and mid-pinch.
     func apply(_ framing: Framing) {
+        setFraming(framing)
+        snapToCurrentPose()
+    }
+
+    /// Adopts a framing, clearing the pinch zoom and the shelf orbit when it is
+    /// actually a different one — those are per-scene view state, and letting
+    /// either survive a scene change leaves the new scene at a pose the user
+    /// never chose (and, for the orbit, one the mode controller believes is
+    /// already zeroed). Re-adopting the current framing keeps both.
+    private func setFraming(_ framing: Framing) {
+        guard framing != self.framing else { return }
         self.framing = framing
+        resetZoomValue()
+        shelfOrbit = (0, 0)
+    }
+
+    /// Snaps to the solved pose, cancelling any dolly still playing — a pinch
+    /// that starts during a scene transition would otherwise be overwritten
+    /// frame by frame by the animation it is fighting.
+    private func snapToCurrentPose() {
+        camera.stopAllAnimations()
         camera.transform = targetTransform(for: framing)
     }
 
@@ -200,31 +234,95 @@ final class CameraRig {
     /// (and always for the shelf, which keeps its own orbit).
     private func targetTransform(for framing: Framing) -> Transform {
         if framing == .binderOpen, let stage, stage.isValid {
-            return Self.stageSolve(framing: framing, stage: stage, fovDegrees: fovDegrees).transform
+            let solved = Self.stageSolve(framing: framing, stage: stage, fovDegrees: fovDegrees).transform
+            return Self.zoomed(solved, about: framing.at + stage.focus, by: zoom)
         }
+        // The shelf orbit belongs here rather than only in `setShelfOrbit`:
+        // this is the one function every path that moves the camera goes
+        // through, so an orbit applied anywhere else is an orbit a pinch or a
+        // resize silently discards.
+        if framing == .shelf, shelfOrbit.yaw != 0 || shelfOrbit.pitch != 0 {
+            let at = Framing.shelf.at
+            let base = eye(for: .shelf) - at
+            let qPitch = simd_quatf(angle: shelfOrbit.pitch, axis: SIMD3<Float>(1, 0, 0))
+            let qYaw = simd_quatf(angle: shelfOrbit.yaw, axis: SIMD3<Float>(0, 1, 0))
+            return Self.lookTransform(at: at, from: at + qYaw.act(qPitch.act(base)))
+        }
+        // `eye(for:)` already divides by the zoom.
         return Self.lookTransform(at: framing.at, from: eye(for: framing))
+    }
+
+    /// Pulls a solved pose toward its focus by the zoom factor, keeping its
+    /// rotation. Scaling the WHOLE offset (not just the distance along the view
+    /// axis) is deliberate: the staged solve carries a lens shift inside the
+    /// image plane, and halving the distance halves the visible extent, so the
+    /// shift has to halve with it or the subject slides off the frame centre it
+    /// was placed at.
+    nonisolated static func zoomed(_ pose: Transform, about focus: SIMD3<Float>, by zoom: Float) -> Transform {
+        guard zoom != 1, zoom > 0, zoom.isFinite else { return pose }
+        return Transform(
+            scale: pose.scale,
+            rotation: pose.rotation,
+            translation: focus + (pose.translation - focus) / zoom)
     }
 
     /// Orbits the shelf framing by yaw (around world up) and pitch (around the
     /// camera's right axis), keeping the shelf focus centered. Used by the
     /// shelf pan gesture.
     func setShelfOrbit(yaw: Float, pitch: Float) {
-        framing = .shelf
+        setFraming(.shelf)
         shelfOrbit = (yaw, pitch)
-        let at = Framing.shelf.at
-        let base = eye(for: .shelf) - at
-        let qPitch = simd_quatf(angle: pitch, axis: SIMD3<Float>(1, 0, 0))
-        let qYaw = simd_quatf(angle: yaw, axis: SIMD3<Float>(0, 1, 0))
-        let offset = qYaw.act(qPitch.act(base))
-        camera.look(at: at, from: at + offset, relativeTo: root)
+        snapToCurrentPose()
     }
 
     /// Smoothly dollies the camera to a framing (scene transition).
     func animate(to framing: Framing, duration: TimeInterval = 0.7) {
-        self.framing = framing
+        setFraming(framing)
         camera.move(
             to: targetTransform(for: framing),
             relativeTo: root, duration: duration, timingFunction: .easeInOut)
+    }
+
+    // MARK: Pinch zoom
+
+    /// Captures the zoom baseline at the start of a pinch.
+    func beginZoom() {
+        zoomAtPinchStart = zoom
+    }
+
+    /// Applies a pinch's absolute magnification (1 = unchanged since
+    /// pinch-start) on top of the captured baseline, snapping the camera so it
+    /// tracks the fingers.
+    func updateZoom(magnification: CGFloat) {
+        let requested = zoomAtPinchStart * Float(magnification)
+        guard requested.isFinite else { return }
+        zoom = min(max(requested, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
+        snapToCurrentPose()
+    }
+
+    /// Ends a pinch, keeping wherever it landed.
+    func endZoom() {
+        zoomAtPinchStart = zoom
+    }
+
+    /// Returns to the solved framing, keeping any shelf orbit (the "1x"
+    /// control). Pinching back to exactly 1 by hand is fussy, so this is the
+    /// only way home.
+    func resetZoom(animated: Bool = true) {
+        guard zoom != 1 else { return }
+        resetZoomValue()
+        if animated {
+            camera.move(
+                to: targetTransform(for: framing),
+                relativeTo: root, duration: 0.25, timingFunction: .easeInOut)
+        } else {
+            snapToCurrentPose()
+        }
+    }
+
+    private func resetZoomValue() {
+        zoom = 1
+        zoomAtPinchStart = 1
     }
 
     // MARK: Aspect-aware framing
@@ -336,7 +434,8 @@ final class CameraRig {
     }
 
     /// Eye position for a framing at the current viewport aspect: the tuned
-    /// direction, with the distance solved for the visible width.
+    /// direction, with the distance solved for the visible width and then
+    /// divided by the pinch zoom (2x zoom = half the distance).
     func eye(for framing: Framing) -> SIMD3<Float> {
         let distance = Self.framingDistance(
             subjectHalfWidth: framing.subjectHalfWidth,
@@ -344,7 +443,7 @@ final class CameraRig {
             aspect: aspect,
             fovDegrees: fovDegrees
         )
-        return framing.at + framing.eyeDirection * distance
+        return framing.at + framing.eyeDirection * (distance / zoom)
     }
 
     /// Camera distance that fits a subject of half-width `subjectHalfWidth`

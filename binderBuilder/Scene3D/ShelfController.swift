@@ -32,6 +32,17 @@ final class ShelfController {
     private var binderRestTransforms: [String: Transform] = [:]
     /// Bumped per display refresh so stale async art loads drop out.
     private var displayGeneration = 0
+    /// Highest `requestID` applied by `refreshDisplayCases`, so an out-of-order
+    /// snapshot can be dropped. Callers get their ids from `nextDisplayRequest`.
+    private var appliedDisplayRequest = -1
+    private var issuedDisplayRequests = 0
+
+    /// Ticket for a display-case read that is about to start. Hand the returned
+    /// id to `refreshDisplayCases` when the read completes.
+    func nextDisplayRequest() -> Int {
+        issuedDisplayRequests += 1
+        return issuedDisplayRequests
+    }
 
     /// What the rows were last built from — refreshes are skipped when
     /// nothing changed (the Binder tab re-appears often).
@@ -52,7 +63,12 @@ final class ShelfController {
         builtBinders = binders
         builtOpenID = openBinderID
 
-        binderRow.children.forEach { $0.removeFromParent() }
+        // `children` is a live view of the parent: removing while iterating it
+        // advances the index past the entity that slid down into the vacated
+        // slot, so a plain forEach leaves half the row behind — ghost binders
+        // z-fighting at the same coordinates, with live tap colliders that can
+        // resolve to a deleted binder's id.
+        binderRow.children.removeAll()
         binderEntities.removeAll()
         binderRestTransforms.removeAll()
 
@@ -81,13 +97,20 @@ final class ShelfController {
 
     // MARK: - Display row
 
-    func refreshDisplayCases(_ contents: [SlotContent?], maxCount: Int) {
+    /// Applies a display-case snapshot. `requestID` orders concurrent callers:
+    /// the contents are read asynchronously, so two quick edits can land out of
+    /// order, and the older one would otherwise latch itself into
+    /// `builtContents` — leaving the shelf showing the pre-edit card with the
+    /// equality guard suppressing every later correction.
+    func refreshDisplayCases(_ contents: [SlotContent?], maxCount: Int, requestID: Int) {
+        guard requestID >= appliedDisplayRequest else { return }
+        appliedDisplayRequest = requestID
         guard contents != builtContents else { return }
         builtContents = contents
         displayGeneration += 1
         let generation = displayGeneration
 
-        displayRow.children.forEach { $0.removeFromParent() }
+        displayRow.children.removeAll()   // see refreshBinders: never iterate-and-remove
 
         let xs = ShelfLayout.displayXs(count: contents.count, reserveAddSlot: contents.count < maxCount)
         for (index, x) in xs.enumerated() {

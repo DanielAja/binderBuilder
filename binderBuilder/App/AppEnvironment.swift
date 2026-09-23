@@ -52,8 +52,34 @@ final class AppEnvironment {
     /// from anywhere (2D grid, card detail, scans) always reach the scene.
     private(set) var contentToken = 0
 
-    /// Records that `content` was just rebuilt from the store's current state.
-    private func markContentFresh() {
+    /// Bumped when a content rebuild starts, so one that finishes after a newer
+    /// rebuild can drop its result instead of overwriting fresher pockets.
+    @ObservationIgnored private var contentBuildSeq = 0
+
+    /// Re-snapshots `content` for `binderID`. Returns false if a newer rebuild
+    /// (or a switch to an empty binder) started while this one was awaiting —
+    /// in which case nothing is written and `contentToken` is left alone.
+    ///
+    /// The token is captured BEFORE the build, not after: stamping the live
+    /// token on completion would mark a snapshot of the token-5 state as
+    /// describing token 7, and the Binder tab's staleness guard would then see
+    /// "fresh" and never reconcile the pockets it is actually rendering.
+    @discardableResult
+    private func rebuildContent(for binderID: String) async -> Bool {
+        contentBuildSeq += 1
+        let seq = contentBuildSeq
+        let token = binders.changeToken
+        let built = await BinderCardContentBuilder.build(binderID: binderID, store: binders)
+        guard seq == contentBuildSeq else { return false }
+        content.replace(with: built)
+        contentToken = token
+        return true
+    }
+
+    /// Drops to empty content, cancelling any rebuild still in flight.
+    private func clearContent() {
+        contentBuildSeq += 1
+        content.replace(with: BinderCardContent.empty)
         contentToken = binders.changeToken
     }
 
@@ -160,8 +186,7 @@ final class AppEnvironment {
             return
         }
         openBinderID = binder.id
-        content.replace(with: await BinderCardContentBuilder.build(binderID: binder.id, store: binders))
-        markContentFresh()
+        await rebuildContent(for: binder.id)
         Self.log.info("Prepared binder \(binder.id, privacy: .public) with \(self.content.sheetCount, privacy: .public) sheets")
         // Seed the "known sets" baseline so new-release alerts only fire for
         // sets released after this catalog build.
@@ -182,8 +207,7 @@ final class AppEnvironment {
         guard binders.binders.contains(where: { $0.id == binderID }) else { return }
         openBinderID = binderID
         settings.lastOpenBinderID = binderID
-        content.replace(with: await BinderCardContentBuilder.build(binderID: binderID, store: binders))
-        markContentFresh()
+        await rebuildContent(for: binderID)
     }
 
     /// Called when the binder list may have changed under the open binder
@@ -196,8 +220,7 @@ final class AppEnvironment {
         } else {
             openBinderID = nil
             settings.lastOpenBinderID = nil
-            content.replace(with: BinderCardContent.empty)
-            markContentFresh()
+            clearContent()
         }
     }
 
@@ -223,9 +246,7 @@ final class AppEnvironment {
     @discardableResult
     func reloadOpenBinderContent(_ binderID: String) async -> Bool {
         guard binderID == openBinderID else { return false }
-        content.replace(with: await BinderCardContentBuilder.build(binderID: binderID, store: binders))
-        markContentFresh()
-        return true
+        return await rebuildContent(for: binderID)
     }
 
     /// Runs the price-drop + new-release alert checks (on app activation /

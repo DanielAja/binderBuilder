@@ -62,8 +62,12 @@ struct ContentView: View {
     private var shouldShowOnboarding: Bool {
         guard !env.settings.hasSeenOnboarding else { return false }
         if DebugLaunchState.current.uiState != nil { return false }
+        // Keep in step with every flag that routes somewhere: a missing entry
+        // means that screenshot run comes back showing the onboarding tour.
         let routingFlags = ["-showSets", "-showCollection", "-showSettings",
-                            "-showDrops", "-showCardDetail", "-showScan", "-fireTestAlert"]
+                            "-showDrops", "-showCardDetail", "-showScan", "-fireTestAlert",
+                            "-showGrid", "-showTrade", "-showFastScan",
+                            "-fastScanDemo", "-tradeEditorDemo"]
         if routingFlags.contains(where: { DebugLaunchState.launchFlag($0) }) { return false }
         return true
     }

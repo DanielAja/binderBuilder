@@ -16,6 +16,7 @@
 //    -deformer <gpu|cpu>                        select PageDeformer implementation
 //    -fold <flat|book|tabletop|compact>         simulate an iPhone Duo pose on any device
 //    -hinge <degrees>                           simulated hinge angle (180 = flat)
+//    -zoom <0.6...2.5>                          apply a pinch zoom at launch
 //
 
 import Foundation
@@ -42,6 +43,9 @@ nonisolated struct DebugLaunchState {
     let foldPose: FoldPose?
     /// Hinge angle to feed the simulated pose; defaults per pose when absent.
     let hingeDegrees: Double?
+    /// Pinch zoom to apply once the scene is up — a pinch can't be driven from
+    /// `simctl`, so this is how the dolly gets screenshot-verified.
+    let zoom: Float?
 
     static let current = DebugLaunchState(arguments: launchArguments)
 
@@ -94,5 +98,6 @@ nonisolated struct DebugLaunchState {
         deformer = value(after: "-deformer").flatMap(Deformer.init(rawValue:))
         foldPose = value(after: "-fold").flatMap(FoldPose.init(rawValue:))
         hingeDegrees = value(after: "-hinge").flatMap(Double.init).map { min(max($0, 0), 180) }
+        zoom = value(after: "-zoom").flatMap(Float.init)
     }
 }
