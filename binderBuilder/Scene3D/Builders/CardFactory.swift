@@ -17,7 +17,8 @@
 //
 //  The foil tier comes from the card's rarity string + physical variant
 //  (FoilTier.resolve); the motion system drives the light phase, here it
-//  starts at rest.
+//  starts at rest — .zw = (0, 0), which is what MotionUpdateSystem resolves
+//  to for a still device, so the first frame doesn't pop hue.
 //
 
 import Metal
@@ -87,7 +88,7 @@ enum CardFactory {
                 custom.custom.value = SIMD4<Float>(
                     FoilUniforms.packTier(foil, strength: holoStrength(for: variant, tier: foil)),
                     FoilUniforms.packEra(artBoxEra, grayscale: grayscale),
-                    0.5,
+                    0,   // .zw: light phase at rest; MotionUpdateSystem takes over
                     0
                 )
                 custom.faceCulling = .back
@@ -153,9 +154,20 @@ enum CardFactory {
         artBoxEra: Int = 0
     ) {
         guard var model = entity.components[ModelComponent.self], !model.materials.isEmpty else { return }
-        model.materials[0] = frontMaterial(
+        // The running light phase in .zw belongs to MotionUpdateSystem and must
+        // survive a texture/uniform swap — otherwise art arrival snaps the
+        // highlight back to rest for a frame.
+        let previous = (model.materials.first as? CustomMaterial)?.custom.value
+        let newMaterial = frontMaterial(
             texture: texture, variant: variant, owned: owned, foil: foil, artBoxEra: artBoxEra
         )
+        if var fresh = newMaterial as? CustomMaterial, let previous {
+            fresh.custom.value.z = previous.z
+            fresh.custom.value.w = previous.w
+            model.materials[0] = fresh
+        } else {
+            model.materials[0] = newMaterial
+        }
         entity.components.set(model)
     }
 

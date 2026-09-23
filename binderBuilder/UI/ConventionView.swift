@@ -181,7 +181,7 @@ struct ConventionView: View {
             Text("Lifetime trade P/L").font(.caption).foregroundStyle(.secondary)
             Text(net, format: .currency(code: "USD"))
                 .font(.title.bold().monospacedDigit())
-                .foregroundStyle(net >= 0 ? .green : .orange)
+                .foregroundStyle(net >= 0 ? Color.tradeGain : Color.tradeLoss)
             HStack(spacing: 14) {
                 Label(env.trades.totalReceivedValue.formatted(.currency(code: "USD")), systemImage: "arrow.down.left")
                 Label(env.trades.totalGivenValue.formatted(.currency(code: "USD")), systemImage: "arrow.up.right")
@@ -200,7 +200,7 @@ struct ConventionView: View {
             }
             Spacer()
             Text(amount, format: .currency(code: "USD"))
-                .font(.title3.bold().monospacedDigit()).foregroundStyle(.green)
+                .font(.title3.bold().monospacedDigit()).foregroundStyle(Color.tradeGain)
         }
     }
 
@@ -305,6 +305,7 @@ private struct ListingRow: View {
     let summary: CardSummary?
     let resolved: Double?
     let env: AppEnvironment
+    @ScaledMetric(relativeTo: .body) private var thumbWidth: CGFloat = 40
 
     var body: some View {
         HStack(spacing: 12) {
@@ -313,7 +314,7 @@ private struct ListingRow: View {
                 // The summaries load after the first render; re-identify so the
                 // image view refetches instead of keeping the no-image card back.
                 .id(summary?.imageBase)
-                .frame(width: 40, height: 55)
+                .frame(width: thumbWidth, height: thumbWidth * 88 / 63)
             VStack(alignment: .leading, spacing: 2) {
                 Text(summary?.name ?? listing.ref.fallbackName).font(.subheadline).lineLimit(1)
                 Text("\(listing.condition.rawValue) · ×\(listing.quantity) · asking \(listing.value.label)")
@@ -322,7 +323,7 @@ private struct ListingRow: View {
             Spacer()
             if let resolved {
                 Text(resolved * Double(listing.quantity), format: .currency(code: "USD"))
-                    .font(.subheadline.bold().monospacedDigit()).foregroundStyle(.green)
+                    .font(.subheadline.bold().monospacedDigit()).foregroundStyle(Color.tradeGain)
             }
         }
     }
@@ -335,13 +336,14 @@ private struct WantRow: View {
     let priority: Int
     let resolved: Double?
     let env: AppEnvironment
+    @ScaledMetric(relativeTo: .body) private var thumbWidth: CGFloat = 40
 
     var body: some View {
         HStack(spacing: 12) {
             CardImageView(cardID: ref.cardID, imageBase: summary?.imageBase,
                           quality: .low, imageCache: env.imageCache)
                 .id(summary?.imageBase)
-                .frame(width: 40, height: 55)
+                .frame(width: thumbWidth, height: thumbWidth * 88 / 63)
             VStack(alignment: .leading, spacing: 2) {
                 Text(summary?.name ?? ref.fallbackName).font(.subheadline).lineLimit(1)
                 HStack(spacing: 4) {
@@ -356,7 +358,7 @@ private struct WantRow: View {
             Spacer()
             if let resolved {
                 Text(resolved, format: .currency(code: "USD"))
-                    .font(.subheadline.bold().monospacedDigit()).foregroundStyle(.pink)
+                    .font(.subheadline.bold().monospacedDigit()).foregroundStyle(Color.tradeWant)
             }
         }
     }
@@ -492,4 +494,19 @@ private struct WantTargetEditorView: View {
 
 extension CardRef: Identifiable {
     public var id: String { "\(cardID)|\(variant.rawValue)" }
+}
+
+/// Money colours that clear AA on `systemBackground` in both schemes. The raw
+/// `.green` / `.orange` / `.pink` system colours sit at ~2:1 in light mode, so
+/// light mode gets darkened variants while dark mode keeps the system hues.
+private extension Color {
+    static let tradeGain = Color(uiColor: UIColor {
+        $0.userInterfaceStyle == .dark ? .systemGreen : UIColor(red: 0.00, green: 0.47, blue: 0.22, alpha: 1)
+    })
+    static let tradeLoss = Color(uiColor: UIColor {
+        $0.userInterfaceStyle == .dark ? .systemOrange : UIColor(red: 0.72, green: 0.34, blue: 0.00, alpha: 1)
+    })
+    static let tradeWant = Color(uiColor: UIColor {
+        $0.userInterfaceStyle == .dark ? .systemPink : UIColor(red: 0.72, green: 0.07, blue: 0.36, alpha: 1)
+    })
 }

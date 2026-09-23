@@ -57,8 +57,12 @@ enum BinderBuilder3D {
 
     /// Gauge of the ring wire (m).
     static let ringWire: Float = 0.0022
-    /// Ring radii, floor and ceiling. The floor is a slim "1 inch" binder.
-    static let ringRadiusRange: ClosedRange<Float> = 0.012...0.045
+    /// Ring radii, floor and ceiling. The floor is a slim "1 inch" binder;
+    /// the ceiling has room for the fattest stack we build (40 sheets =
+    /// 0.096 m plus the clearance below) without clamping.
+    static let ringRadiusRange: ClosedRange<Float> = 0.012...0.11
+    /// How far the ring arc's apex clears the top of the page stack (m).
+    static let ringClearance: Float = 0.008
     /// Where along the spine the three rings sit (m from the binder's middle).
     static let ringOffsetsZ: [Float] = [-0.095, 0, 0.095]
     /// Segments per ring arc — enough that 2 mm wire reads as round.
@@ -79,11 +83,14 @@ enum BinderBuilder3D {
         coverThickness + Float(max(0, sheets)) * sheetThickness
     }
 
-    /// Ring radius for a binder whose thickest side holds `sheets` sheets —
-    /// tall enough to clear the stack with room for the pages to swing.
+    /// Ring radius for a binder whose thickest side holds `sheets` sheets.
+    /// The arc apex sits at `coverThickness + 0.002 + radius` while the stack
+    /// top is at `coverThickness + stack`, so the radius has to be the stack
+    /// height itself plus a clearance — anything less and the wire sinks into
+    /// the paper on thick binders.
     static func ringRadius(sheets: Int) -> Float {
         let stack = Float(max(0, sheets)) * sheetThickness
-        return min(max(0.012 + 0.55 * stack, ringRadiusRange.lowerBound), ringRadiusRange.upperBound)
+        return min(max(stack + ringClearance, ringRadiusRange.lowerBound), ringRadiusRange.upperBound)
     }
 
     static func makeOpenBinder() -> BinderRig {

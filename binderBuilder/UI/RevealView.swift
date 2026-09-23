@@ -168,7 +168,8 @@ struct RevealView: View {
                 Text(item.name)
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(.white)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
                 if let price = item.price {
                     Text(price, format: .currency(code: "USD"))
                         .font(.title2.bold().monospacedDigit())
@@ -181,7 +182,11 @@ struct RevealView: View {
                 .opacity(awaitingTap ? 1 : 0)
                 .accessibilityHidden(!awaitingTap)
         }
-        .frame(height: 92, alignment: .top)
+        // Reserves the caption's height so the card doesn't jump when the
+        // name lands, but grows past it at accessibility sizes instead of
+        // clipping the price and the tap hint.
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(minHeight: 92, alignment: .top)
         .animation(.easeInOut(duration: 0.2), value: awaitingTap)
         .multilineTextAlignment(.center)
         .padding(.horizontal, 24)

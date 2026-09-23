@@ -110,7 +110,11 @@ private struct HoverCardModifier: ViewModifier {
                 let y = dragTilt?.y ?? sway.y
                 let bob = dragTilt == nil ? sway.bob : 0
 
+                // Flattened before the transform, not after the shadow: a
+                // drawingGroup on the whole TimelineView clipped the drifting
+                // shadow at the layout bounds.
                 content
+                    .drawingGroup()
                     .rotation3DEffect(x, axis: (1, 0, 0), perspective: Self.perspective)
                     .rotation3DEffect(y, axis: (0, 1, 0), perspective: Self.perspective)
                     .offset(y: bob)
@@ -125,7 +129,6 @@ private struct HoverCardModifier: ViewModifier {
             }
             .onGeometryChange(for: CGSize.self, of: \.size) { size = $0 }
             .gesture(dragGesture)
-            .drawingGroup()
         }
     }
 

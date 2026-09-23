@@ -333,6 +333,9 @@ struct BinderSceneView: View {
 
     private var shelfButton: some View {
         Button {
+            // Send any floating card home first: parented to the scene root it
+            // would otherwise keep rendering in the shelf room.
+            model.result.cardInteraction?.snapFloatingCardHome()
             model.result.modeController?.enterShelf()
             sceneMode = .shelf
             floatingRef = nil
@@ -577,6 +580,9 @@ struct BinderSceneView: View {
             try? await Task.sleep(for: .milliseconds(150))
             await env.openBinder(binderID)
             if let controller = model.result.controller {
+                // CardPlacementSystem.sync indexes page.children, so a floating
+                // card's pocket reads empty and rebind spawns a duplicate.
+                model.result.cardInteraction?.snapFloatingCardHome()
                 controller.rebind(spread: controller.sheetCount / 2)
             }
             modeController.enterBinder()
@@ -640,6 +646,9 @@ struct BinderSceneView: View {
                 await env.reloadOpenBinderContent(id)
             }
             if let controller = model.result.controller {
+                // CardPlacementSystem.sync indexes page.children, so a floating
+                // card's pocket reads empty and rebind spawns a duplicate.
+                model.result.cardInteraction?.snapFloatingCardHome()
                 controller.rebind(spread: controller.spreadIndex)
             }
         }

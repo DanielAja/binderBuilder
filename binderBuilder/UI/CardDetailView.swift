@@ -78,7 +78,8 @@ struct CardDetailView: View {
                         .padding(.vertical, 6)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(owned ? .green : .accentColor)
+                // systemGreen behind a white label is ~2.3:1; this darker green is ~4.6:1.
+                .tint(owned ? Color(red: 0.10, green: 0.52, blue: 0.26) : .accentColor)
                 .padding(.horizontal)
 
                 copiesSection

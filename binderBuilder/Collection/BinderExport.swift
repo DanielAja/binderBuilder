@@ -231,7 +231,9 @@ enum BinderExport {
 
     // MARK: - Rendering
 
-    /// Multi-page PDF, one page per binder side.
+    /// Multi-page PDF, one page per binder side. Stays synchronous: the
+    /// `pdfData` closure is a non-async drawing callback, so there is nowhere
+    /// to yield between pages (unlike the image writers below).
     @MainActor
     static func pdfData(_ job: BinderExportJob) -> Data {
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(origin: .zero, size: pageSize))
@@ -259,28 +261,72 @@ enum BinderExport {
     /// folder and returns the files, ready to hand to a share sheet.
     @MainActor
     static func writeImages(_ job: BinderExportJob, format: BinderExportFormat) throws -> [URL] {
-        let folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("BinderExport-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-
+        let folder = try makeExportFolder()
         var urls: [URL] = []
         for page in job.pages {
-            let renderer = ImageRenderer(content: pageView(page, job: job))
-            renderer.scale = renderScale
-            let data: Data?
-            switch format {
-            case .jpegs: data = renderer.uiImage?.jpegData(compressionQuality: jpegQuality)
-            case .pngs, .pdf: data = renderer.uiImage?.pngData()
-            }
-            guard let data else { continue }
-            let url = folder.appendingPathComponent(
-                imageFileName(binderName: job.binderName, page: page,
-                              fileExtension: format == .jpegs ? "jpg" : "png"),
-                isDirectory: false)
+            guard let data = renderImageData(page, job: job, format: format) else { continue }
+            let url = imageURL(in: folder, job: job, page: page, format: format)
             try data.write(to: url, options: .atomic)
             urls.append(url)
         }
         return urls
+    }
+
+    /// Same output as the synchronous `writeImages`, but yields between pages
+    /// so the progress ring keeps turning instead of the UI freezing for the
+    /// whole render phase. `progress` continues where `prepare` left off: the
+    /// render is the last 5% of an export.
+    @MainActor
+    static func writeImages(
+        _ job: BinderExportJob,
+        format: BinderExportFormat,
+        progress: (Double) -> Void
+    ) async throws -> [URL] {
+        let folder = try makeExportFolder()
+        var urls: [URL] = []
+        for (index, page) in job.pages.enumerated() {
+            if let data = renderImageData(page, job: job, format: format) {
+                let url = imageURL(in: folder, job: job, page: page, format: format)
+                try data.write(to: url, options: .atomic)
+                urls.append(url)
+            }
+            progress(0.95 + 0.05 * Double(index + 1) / Double(job.pages.count))
+            await Task.yield()
+        }
+        return urls
+    }
+
+    /// A fresh temporary folder per export, so repeated exports of the same
+    /// binder never collide on file names.
+    private static func makeExportFolder() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BinderExport-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    /// Rasterizes one page at `renderScale` and encodes it. nil when
+    /// ImageRenderer produced nothing — that page is simply skipped.
+    @MainActor
+    private static func renderImageData(
+        _ page: BinderExportPage, job: BinderExportJob, format: BinderExportFormat
+    ) -> Data? {
+        let renderer = ImageRenderer(content: pageView(page, job: job))
+        renderer.scale = renderScale
+        switch format {
+        case .jpegs: return renderer.uiImage?.jpegData(compressionQuality: jpegQuality)
+        case .pngs, .pdf: return renderer.uiImage?.pngData()
+        }
+    }
+
+    @MainActor
+    private static func imageURL(
+        in folder: URL, job: BinderExportJob, page: BinderExportPage, format: BinderExportFormat
+    ) -> URL {
+        folder.appendingPathComponent(
+            imageFileName(binderName: job.binderName, page: page,
+                          fileExtension: format == .jpegs ? "jpg" : "png"),
+            isDirectory: false)
     }
 
     /// Renders the job as a PDF file on disk (for share sheets; the
@@ -433,7 +479,8 @@ struct BinderPNGShare: Identifiable {
             case .pdf:
                 share = BinderPNGShare(urls: [try BinderExport.writePDF(job)])
             case .pngs, .jpegs:
-                share = BinderPNGShare(urls: try BinderExport.writeImages(job, format: format))
+                share = BinderPNGShare(urls: try await BinderExport.writeImages(
+                    job, format: format) { progress = $0 })
             }
             return true
         } catch {

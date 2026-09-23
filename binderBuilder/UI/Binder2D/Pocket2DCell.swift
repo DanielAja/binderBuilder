@@ -34,8 +34,10 @@ struct Pocket2DCell: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             } else {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(Color.secondary.opacity(0.5),
-                                  style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                    // Full-alpha secondary at 1.5 pt: the dashes are a
+                    // non-text element, so they need 3:1 against the tray.
+                    .strokeBorder(Color.secondary,
+                                  style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
                     .overlay {
                         Image(systemName: "plus")
                             .font(.body.weight(.medium))
@@ -65,15 +67,25 @@ private struct JiggleEffect: ViewModifier {
     let active: Bool
     let phase: Int
 
+    /// The wobble toggles between the two extremes so the cell leans about
+    /// zero; animating `active` itself only swung from upright to one side.
+    @State private var tick = false
+
     func body(content: Content) -> some View {
         content
-            .rotationEffect(.degrees(active ? (phase.isMultiple(of: 2) ? 1.2 : -1.2) : 0))
-            .animation(
-                active
-                    ? .easeInOut(duration: 0.14)
+            // Inactive is always upright, so a stale `tick` leaves no lean.
+            .rotationEffect(.degrees(active ? (tick ? 1.2 : -1.2) : 0))
+            .onChange(of: active, initial: true) { _, on in
+                if on {
+                    tick = phase.isMultiple(of: 2)
+                    withAnimation(.easeInOut(duration: 0.14)
                         .repeatForever(autoreverses: true)
-                        .delay(Double(phase % 3) * 0.045)
-                    : .default,
-                value: active)
+                        .delay(Double(phase % 3) * 0.045)) {
+                        tick.toggle()
+                    }
+                } else {
+                    withAnimation(.default) { tick = false }
+                }
+            }
     }
 }

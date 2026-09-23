@@ -397,17 +397,36 @@ struct Binder2DView: View {
             .padding(.bottom, 8)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if let source = moveSource {
-            HStack(spacing: 12) {
-                Text("Tap a pocket to move the card there")
-                    .font(.subheadline.weight(.medium))
-                Picker("Move style", selection: $moveMode) {
-                    Text("Shift").tag(SlotMoveMode.insertShift)
-                    Text("Swap").tag(SlotMoveMode.swap)
+            // Three peers in one row overflow a 320-375 pt screen (and any
+            // accessibility text size), so the hint stacks above the controls
+            // when the single row won't fit.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    Text("Tap a pocket to move the card there")
+                        .font(.subheadline.weight(.medium))
+                    Picker("Move style", selection: $moveMode) {
+                        Text("Shift").tag(SlotMoveMode.insertShift)
+                        Text("Swap").tag(SlotMoveMode.swap)
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    Button("Cancel") { moveSource = nil }
+                        .font(.subheadline.weight(.semibold))
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 130)
-                Button("Cancel") { moveSource = nil }
-                    .font(.subheadline.weight(.semibold))
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Tap a pocket to move the card there")
+                        .font(.subheadline.weight(.medium))
+                    HStack(spacing: 12) {
+                        Picker("Move style", selection: $moveMode) {
+                            Text("Shift").tag(SlotMoveMode.insertShift)
+                            Text("Swap").tag(SlotMoveMode.swap)
+                        }
+                        .pickerStyle(.segmented)
+                        .fixedSize()
+                        Button("Cancel") { moveSource = nil }
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
             .floatingGlass()

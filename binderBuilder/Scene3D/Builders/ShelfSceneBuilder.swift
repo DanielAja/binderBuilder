@@ -285,7 +285,9 @@ enum ShelfSceneBuilder {
             mesh: .generateBox(width: 0.006, height: 0.032, depth: 0.004, cornerRadius: 0.002),
             materials: [plusMaterial])
         horizontal.position = SIMD3<Float>(0, 0.055, 0)
-        vertical.position = SIMD3<Float>(0, 0.055, 0)
+        // Proud of the horizontal bar: identical-depth boxes at the same z
+        // z-fight and double-composite the 0.8 alpha where they cross.
+        vertical.position = SIMD3<Float>(0, 0.055, 0.0006)
         slot.addChild(horizontal)
         slot.addChild(vertical)
 

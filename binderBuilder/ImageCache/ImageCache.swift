@@ -129,7 +129,7 @@ actor ImageCache {
         let key = Self.key(cardID: cardID, quality: quality)
         if let cached = memory.object(forKey: key as NSString) { return cached }
 
-        if let image = loadFromDisk(cardID: cardID, quality: quality, promoteToPinned: pinned) {
+        if let image = await loadFromDisk(cardID: cardID, quality: quality, promoteToPinned: pinned) {
             memory.setObject(image, forKey: key as NSString, cost: Self.cost(of: image))
             return image
         }
@@ -248,7 +248,7 @@ actor ImageCache {
                 guard (200..<300).contains(http.statusCode) else {
                     throw URLError(.badServerResponse)
                 }
-                guard let image = Self.decode(data, quality: quality) else {
+                guard let image = await Self.decodeDetached(data, quality: quality) else {
                     throw URLError(.cannotDecodeContentData)
                 }
                 write(data: data, cardID: cardID, quality: quality, pinned: pinned)
@@ -271,7 +271,7 @@ actor ImageCache {
 
     // MARK: - Disk
 
-    private func loadFromDisk(cardID: String, quality: ImageQuality, promoteToPinned: Bool) -> CGImage? {
+    private func loadFromDisk(cardID: String, quality: ImageQuality, promoteToPinned: Bool) async -> CGImage? {
         let fileManager = FileManager.default
         let pinnedURL = Self.fileURL(root: pinnedRoot, quality: quality, cardID: cardID)
         let transientURL = Self.fileURL(root: cachesRoot, quality: quality, cardID: cardID)
@@ -289,7 +289,7 @@ actor ImageCache {
         }
         guard let location,
               let data = try? Data(contentsOf: location),
-              let image = Self.decode(data, quality: quality)
+              let image = await Self.decodeDetached(data, quality: quality)
         else { return nil }
         return image
     }
@@ -353,7 +353,11 @@ actor ImageCache {
     /// decode buffer to be recreated on every draw. `.high` images always
     /// decode at full size: CardTextureCache needs the true 600x825 texture
     /// for the binder's 3D card surfaces, and the card detail view shows
-    /// `.high` art at near-native size.
+    /// `.high` art at near-native size. Both tiers decode *eagerly*
+    /// (`kCGImageSourceShouldCacheImmediately`): a lazy `.high` CGImage is
+    /// re-decoded by CoreGraphics on every draw, which the animated detail
+    /// and reveal surfaces (interactiveCard / tiltShimmer) pay for frame
+    /// after frame, and which TextureResource would pay on the main actor.
     private static let lowQualityMaxPixelSize = 400
 
     static func decode(_ data: Data, quality: ImageQuality) -> CGImage? {
@@ -361,7 +365,11 @@ actor ImageCache {
         guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else { return nil }
 
         guard quality == .low else {
-            return CGImageSourceCreateImageAtIndex(source, 0, sourceOptions)
+            let fullOptions = [
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceShouldCache: true,
+            ] as CFDictionary
+            return CGImageSourceCreateImageAtIndex(source, 0, fullOptions)
         }
         let thumbnailOptions = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -369,6 +377,15 @@ actor ImageCache {
             kCGImageSourceShouldCacheImmediately: true,
         ] as CFDictionary
         return CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions)
+    }
+
+    /// Runs `decode` off the cache actor. Decoding a 600x825 WebP is tens of
+    /// milliseconds of CPU; done inline it serializes every disk hit and every
+    /// download behind the actor, so a 250-card prefetch would queue ahead of
+    /// the one thumbnail the user is actually looking at. On a detached task
+    /// the prefetch's 6-way group really overlaps.
+    nonisolated private static func decodeDetached(_ data: Data, quality: ImageQuality) async -> CGImage? {
+        await Task.detached(priority: .userInitiated) { decode(data, quality: quality) }.value
     }
 
     private static func cost(of image: CGImage) -> Int {

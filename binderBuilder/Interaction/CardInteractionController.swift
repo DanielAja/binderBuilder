@@ -80,6 +80,27 @@ final class CardInteractionController {
         returnCard()
     }
 
+    /// Puts the floating card back in its pocket INSTANTLY — no spring, no
+    /// haptic. This is the path used when the binder is about to be hidden
+    /// (shelf) or rebound: a card still parented to the scene root would
+    /// render alone in the shelf room, and CardPlacementSystem.sync would see
+    /// its pocket as empty. Mirrors CardFloatSystem.finalizeReturn exactly.
+    func snapFloatingCardHome() {
+        guard let card = floatingCard, let f = card.components[CardFloatComponent.self] else { return }
+        card.components.remove(CardFloatComponent.self)
+        if let parent = f.homeParent {
+            parent.addChild(card)
+            card.transform = f.homeLocal
+        }
+        // Force CardPlacementSystem to re-pose it at the pocket curl frame.
+        if var slot = card.components[CardSlotComponent.self] {
+            slot.lastParams = nil
+            card.components.set(slot)
+        }
+        floatingCard = nil   // fires onFloatingChanged, clearing the UI bar
+        resetDrag()
+    }
+
     /// Auto-pull a specific card (debug / -uiState cardFloating), optionally
     /// settling it at a yaw so the foil shows at an angle in screenshots.
     func pullOutFirstAvailable(yawDegrees: Float? = nil) {

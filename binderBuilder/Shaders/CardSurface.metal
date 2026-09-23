@@ -58,6 +58,17 @@ static inline float bb_card_luminance(float3 c)
     return dot(c, float3(0.2126f, 0.7152f, 0.0722f));
 }
 
+/// Screen-footprint fade for a procedural field of the given frequency
+/// (cycles per uv unit). `px` is the uv footprint of one pixel, so
+/// px * cyclesPerUV is cycles per pixel: 1.0 while a cycle still spans >= 4
+/// pixels, falling to 0 by the time it spans <= 2 (the Nyquist limit, where
+/// the field stops resolving and starts aliasing into crawling noise). Fading
+/// a field out beats letting it alias when a card shrinks to pocket size.
+static inline float bb_detail(float px, float cyclesPerUV)
+{
+    return 1.0f - smoothstep(0.25f, 0.5f, px * cyclesPerUV);
+}
+
 /// Signed distance to a rounded box centered on the origin (uv space).
 static inline float bb_rounded_box_sdf(float2 p, float2 halfSize, float radius)
 {
@@ -126,11 +137,14 @@ static inline float bb_band_coord(float2 uv, float2 phase)
 /// Etch heightfield: concentric rings crossed with a brushed diagonal. Generic
 /// on purpose — the point is the *feel* of embossed relief, and reproducing a
 /// printed foil pattern is not on the table.
-static inline float bb_etch_height(float2 uv)
+/// `lineDetail` fades the fine brushed lines (the highest-frequency term here)
+/// out by screen footprint — see bb_detail(); the rings are coarse enough to
+/// survive at pocket size on their own.
+static inline float bb_etch_height(float2 uv, float lineDetail)
 {
     const float2 d = uv - float2(0.5f, 0.42f);
     const float rings = sin(length(d * float2(1.0f, 1.35f)) * 58.0f);
-    const float lines = sin(dot(uv, float2(0.86f, 0.51f)) * 155.0f);
+    const float lines = sin(dot(uv, float2(0.86f, 0.51f)) * 155.0f) * lineDetail;
     return 0.62f * rings + 0.38f * lines;
 }
 
@@ -142,7 +156,8 @@ static inline float bb_etch_height(float2 uv)
 ///
 /// EVERY tier branch below funnels through this cap: each one produces a
 /// bounded [0,1]-ish accent, scales it by holoStrength * mask, and is then
-/// min()'d per channel. Nothing is allowed to run away.
+/// capped by its peak channel so the hue is preserved. Nothing is allowed to
+/// run away.
 constant float bb_holo_cap = 0.42f;
 
 /// Warm foil hue for the gold tiers (amber, ~hue 0.10).
@@ -158,6 +173,12 @@ void cardSurface(realitykit::surface_parameters params)
     // MeshDescriptor UVs — flip to match PhysicallyBasedMaterial's convention.
     // After this, uv.y = 0 is the TOP of the card (where the art window is).
     uv.y = 1.0f - uv.y;
+
+    // Screen footprint of one pixel in uv space, used by bb_detail() to fade
+    // the high-frequency procedural fields out before they alias (a card in a
+    // 3x3 binder page covers a fraction of the pixels it does held up close).
+    const float2 fw = fwidth(uv);
+    const float px = max(fw.x, fw.y);
 
     const float4 u = params.uniforms().custom_parameter();
 
@@ -235,7 +256,8 @@ void cardSurface(realitykit::surface_parameters params)
         // Classic holo: cosmos dot-field confined to the art window.
         const float art = bb_art_box(uv, era);
         const float big = bb_spark(uv, float2(15.0f, 21.0f), 0.36f, lightPhase, 0.75f);
-        const float fine = bb_spark(uv, float2(38.0f, 53.0f), 0.26f, lightPhase * 1.7f, 0.85f);
+        const float fine = bb_spark(uv, float2(38.0f, 53.0f), 0.26f, lightPhase * 1.7f, 0.85f)
+                           * bb_detail(px, 53.0f);
         const float dots = saturate(0.75f * big + 0.55f * fine);
         const float3 fleck = mix(float3(1.0f), rainbow, 0.60f);
         accent = art * saturate(fleck * dots * 0.36f
@@ -245,7 +267,8 @@ void cardSurface(realitykit::surface_parameters params)
         // Reverse holo: fine pixel/lattice sparkle on the frame + text boxes,
         // art window deliberately matte.
         const float inv = 1.0f - bb_art_box(uv, era);
-        const float fine = bb_spark(uv, float2(62.0f, 86.0f), 0.24f, lightPhase, 0.70f);
+        const float fine = bb_spark(uv, float2(62.0f, 86.0f), 0.24f, lightPhase, 0.70f)
+                           * bb_detail(px, 86.0f);
         const float3 fleck = mix(float3(1.0f), rainbow, 0.40f);
         accent = inv * saturate(fleck * fine * 0.46f
                                 + rainbow * (0.022f + 0.060f * fresnel));
@@ -265,9 +288,10 @@ void cardSurface(realitykit::surface_parameters params)
         // so projecting the gradient straight onto an in-plane key direction is
         // the same signal with the card's absolute pose divided out.
         const float eps = 0.0025f;
-        const float h0 = bb_etch_height(uv);
-        const float dHdx = (bb_etch_height(uv + float2(eps, 0.0f)) - h0) / eps;
-        const float dHdy = (bb_etch_height(uv + float2(0.0f, eps)) - h0) / eps;
+        const float lineDetail = bb_detail(px, 155.0f / 6.2832f);
+        const float h0 = bb_etch_height(uv, lineDetail);
+        const float dHdx = (bb_etch_height(uv + float2(eps, 0.0f), lineDetail) - h0) / eps;
+        const float dHdy = (bb_etch_height(uv + float2(0.0f, eps), lineDetail) - h0) / eps;
         const float keyAngle = lightPhase.x * 1.9f + lightPhase.y * 1.1f;
         const float2 keyDir = float2(cos(keyAngle), sin(keyAngle));
         const float slope = clamp((dHdx * keyDir.x + dHdy * keyDir.y) * 0.011f, -1.0f, 1.0f);
@@ -287,14 +311,17 @@ void cardSurface(realitykit::surface_parameters params)
         // glitter below (real IRs are alt-art with foil only on the accents).
         const float3 sheen = mix(float3(1.0f), rainbow, 0.55f);
         const float fleck = bb_spark(uv, float2(26.0f, 36.0f), 0.16f, lightPhase, 0.85f);
-        accent = saturate(sheen * rim * (0.16f + 0.34f * fresnel)
+        // Peak 0.34, inside the <= ~0.35 patterned budget above; the previous
+        // (0.16 + 0.34 * fresnel) peaked at 0.50 and blew the file's own budget.
+        accent = saturate(sheen * rim * (0.12f + 0.22f * fresnel)
                           + sheen * fleck * 0.15f
                           + rainbow * (0.018f + 0.045f * fresnel));
         roughness = 0.38f;
     } else if (tier == BB_TIER_SIR) {
         // Special illustration rare: dense full-face glitter + fresnel rim.
         const float glitter = bb_spark(uv, float2(34.0f, 47.0f), 0.32f, lightPhase, 0.80f);
-        const float fine = bb_spark(uv, float2(78.0f, 108.0f), 0.20f, lightPhase * 2.3f, 0.90f);
+        const float fine = bb_spark(uv, float2(78.0f, 108.0f), 0.20f, lightPhase * 2.3f, 0.90f)
+                           * bb_detail(px, 108.0f);
         const float3 fleck = mix(float3(1.0f), rainbow, 0.45f);
         accent = saturate(fleck * saturate(glitter + 0.5f * fine) * 0.38f
                           + rainbow * (0.030f + 0.080f * fresnel)
@@ -350,7 +377,8 @@ void cardSurface(realitykit::surface_parameters params)
         // core stops resolving as flecks and just averages into another broad
         // wash, which is the other half of why mega read flat in the binder.
         const float2 density = mega ? float2(58.0f, 80.0f) : float2(30.0f, 42.0f);
-        const float grain = bb_spark(uv, density, mega ? 0.20f : 0.26f, lightPhase, 0.80f);
+        const float grain = bb_spark(uv, density, mega ? 0.20f : 0.26f, lightPhase, 0.80f)
+                            * bb_detail(px, density.y);
         // Room left before the add clips: 1 on dark art, ~0.35 on a gold face.
         // Broad terms only — sparkle CORES are supposed to reach white, that is
         // what makes a fleck a fleck.
@@ -381,10 +409,15 @@ void cardSurface(realitykit::surface_parameters params)
         accent = saturate(rainbow * fresnel * 0.45f);
     }
 
-    // Capped per channel: a full-strength foil at a grazing angle tops out at
-    // bb_holo_cap of extra albedo instead of running away (which read as a
-    // flat yellow-white flood over the art).
-    const float3 holo = min(accent * holoStrength, float3(bb_holo_cap));
+    // Capped by the PEAK channel, not per channel: a full-strength foil at a
+    // grazing angle tops out at bb_holo_cap of extra albedo instead of running
+    // away (which read as a flat yellow-white flood over the art). Scaling the
+    // whole vector by one factor preserves the accent's hue — a per-channel
+    // min() clamps the crest channel alone and washes a saturated red crest to
+    // pink on its way to the ceiling.
+    float3 holo = accent * holoStrength;
+    const float peak = max(holo.r, max(holo.g, holo.b));
+    holo *= min(1.0f, bb_holo_cap / max(peak, 1e-4f));
     // saturate(): albedo must stay <= 1 or the lighting pass amplifies it.
     color = saturate(color + holo);
 

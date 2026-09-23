@@ -17,8 +17,15 @@ enum BinderLabelTexture {
     /// ShelfSceneBuilder.
     static let size = CGSize(width: 256, height: 64)
 
+    /// Rendered plaques, keyed by orientation + name. refreshBinders tears the
+    /// whole row down on every binders/open-id change, so without this each
+    /// refresh costs a CGContext render plus a GPU upload per binder.
+    private static var cache: [String: TextureResource] = [:]
+
     /// nil when rendering fails (caller just skips the plaque).
     static func make(name: String, vertical: Bool = false) -> TextureResource? {
+        let key = "\(vertical ? "v" : "h")|\(name)"
+        if let cached = cache[key] { return cached }
         let canvas = vertical ? CGSize(width: size.height, height: size.width) : size
         let renderer = UIGraphicsImageRenderer(size: canvas, format: {
             let format = UIGraphicsImageRendererFormat()
@@ -59,7 +66,11 @@ enum BinderLabelTexture {
                             y: (size.height - textSize.height) / 2),
                 withAttributes: attributes)
         }
-        guard let cg = image.cgImage else { return nil }
-        return try? TextureResource(image: cg, options: .init(semantic: .color))
+        guard let cg = image.cgImage,
+              let texture = try? TextureResource(image: cg, options: .init(semantic: .color)) else { return nil }
+        // Unbounded growth isn't a risk worth tracking LRU for: just start over.
+        if cache.count > 64 { cache.removeAll() }
+        cache[key] = texture
+        return texture
     }
 }
