@@ -41,7 +41,11 @@ void pageCurlGeometryModifier(realitykit::geometry_parameters params)
 [[visible]]
 void pageCurlSurface(realitykit::surface_parameters params)
 {
-    constexpr sampler bilinear(filter::linear, address::repeat);
+    // mip_filter::linear: without it the page point-samples mip 0 and shimmers
+    // at distance. clamp_to_edge (not repeat): uv.y is flipped below, so the
+    // boundary row at uv.y == 1.0 would otherwise bilinear-blend with the
+    // opposite edge of the texture. Matches CardSurface.metal's sampler.
+    constexpr sampler bilinear(filter::linear, mip_filter::linear, address::clamp_to_edge);
 
     float2 uv = params.geometry().uv0();
     // RealityKit texture coordinates are flipped vertically relative to MeshDescriptor UVs.

@@ -297,6 +297,9 @@ private struct ResultCard: View {
     /// The one-tap add target grows with Dynamic Type, capped so the row still
     /// fits the card thumbnail and its details on a 375 pt screen.
     @ScaledMetric(relativeTo: .title) private var addSize: CGFloat = 36
+    /// The thumbnail scales with the text beside it rather than staying a
+    /// fixed 62 pt while the name and set grow.
+    @ScaledMetric(relativeTo: .body) private var thumbWidth: CGFloat = 62
 
     private var variants: [CardVariant] {
         let available = CardVariant.allCases.filter { locked.card.availableVariants.contains($0) }
@@ -307,7 +310,7 @@ private struct ResultCard: View {
         HStack(spacing: 14) {
             CardImageView(cardID: locked.card.id, imageBase: locked.card.imageBase,
                           quality: .low, imageCache: env.imageCache)
-                .frame(width: 62, height: 86)
+                .frame(width: thumbWidth, height: thumbWidth * 88 / 63)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 // Foil comes from the printing's rarity, NOT from the price
                 // chip beside it — a cheap hyper rare still has gold foil, and
@@ -352,7 +355,13 @@ private struct ResultCard: View {
                 Button {
                     model.chooseVariant(v)
                 } label: {
-                    Label(v.displayName, systemImage: v == locked.variant ? "checkmark" : "")
+                    // An empty systemImage is not a valid symbol, so the
+                    // unselected rows are plain text.
+                    if v == locked.variant {
+                        Label(v.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(v.displayName)
+                    }
                 }
             }
         } label: {
@@ -388,7 +397,9 @@ private struct ResultCard: View {
             .font(.caption2.bold())
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(pct >= 80 ? Color.green : (pct >= 65 ? .orange : .red), in: Capsule())
-            .foregroundStyle(.white)
+            // Black on the semantic fills clears AA (~11:1 on green, ~8:1 on
+            // orange, ~5:1 on red); white was about 2:1.
+            .foregroundStyle(Color.black.opacity(0.85))
             .padding(8)
     }
 }

@@ -115,9 +115,14 @@ struct CollectionView: View {
                             }
                         } header: {
                             Text("\(group.title)  ·  \(group.cards.count)")
-                                .font(.headline).padding(.vertical, 4)
+                                .font(.headline)
+                                .padding(.vertical, 4).padding(.horizontal, 12)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(.bar)
+                                // Cancel the grid's 12 pt gutters so the bar
+                                // reaches the screen edge and art doesn't
+                                // scroll visibly past the sticky header.
+                                .padding(.horizontal, -12)
                         }
                     }
                 }.padding(12)
@@ -162,7 +167,14 @@ struct CollectionView: View {
                         NavigationLink(value: card) {
                             CardImageView(cardID: card.id, imageBase: card.imageBase, quality: .low,
                                           owned: false, imageCache: env.imageCache)
-                                .overlay(alignment: .topTrailing) { Image(systemName: "heart.fill").foregroundStyle(.pink).padding(5) }
+                                .overlay(alignment: .topTrailing) {
+                                    Image(systemName: "heart.fill").foregroundStyle(.pink).padding(5)
+                                        .accessibilityHidden(true)
+                                }
+                                // The label is art only; without this the link
+                                // reads as an unlabelled button.
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("\(card.name), on wishlist")
                         }.buttonStyle(.pressable)
                     }
                 }.padding(12)
@@ -290,6 +302,8 @@ struct GroupDetailView: View {
                             NavigationLink(value: card) {
                                 CardImageView(cardID: card.id, imageBase: card.imageBase, quality: .low,
                                               owned: true, imageCache: env.imageCache)
+                                    .accessibilityElement(children: .ignore)
+                                    .accessibilityLabel(card.name)
                             }.buttonStyle(.pressable)
                         }
                     }.padding(12)
