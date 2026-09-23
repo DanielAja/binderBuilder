@@ -5,8 +5,8 @@
 //  JSON export/import of the user's collection (copies, wishlist, binders,
 //  slot assignments, display case) so data is never trapped on one device and
 //  can survive a reinstall — addressing the "data loss / no backup" pain point.
-//  Restore replaces all user data; the app should be relaunched afterward so
-//  the in-memory stores reload.
+//  Restore replaces all user data; callers then run
+//  AppEnvironment.reloadAllStores() so the in-memory stores pick it up.
 //
 
 import Foundation

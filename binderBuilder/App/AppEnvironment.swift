@@ -135,7 +135,8 @@ final class AppEnvironment {
         alerts = AlertStore(database: database)
         trades = TradeStore(database: database)
         tradeList = TradeListStore(database: database)
-        cloud = CloudSyncService(database: database)
+        // Never let the throwaway in-memory store push over the real backup.
+        cloud = CloudSyncService(database: database, isTemporaryDatabase: warning != nil)
         stats = CollectionStatsStore(catalog: catalog, collection: collection, database: database)
         let cache = ImageCache.standard()
         imageCache = cache
@@ -208,6 +209,25 @@ final class AppEnvironment {
         openBinderID = binderID
         settings.lastOpenBinderID = binderID
         await rebuildContent(for: binderID)
+    }
+
+    /// Re-reads every store after the database was replaced wholesale (JSON
+    /// import, iCloud restore) and re-snapshots the 3D binder, so the restored
+    /// collection shows up in place instead of needing a relaunch.
+    func reloadAllStores() async {
+        async let c: Void = collection.load()
+        async let w: Void = wishlist.load()
+        async let g: Void = groups.load()
+        async let b: Void = binders.load()
+        async let a: Void = alerts.load()
+        async let t: Void = trades.load()
+        async let tl: Void = tradeList.load()
+        _ = await (c, w, g, b, a, t, tl)
+        // The open binder may not exist in the restored data; re-point first,
+        // then re-snapshot whichever binder is open now (its pockets changed
+        // even when its id survived).
+        await reconcileOpenBinder()
+        if let openBinderID { await reloadOpenBinderContent(openBinderID) }
     }
 
     /// Called when the binder list may have changed under the open binder

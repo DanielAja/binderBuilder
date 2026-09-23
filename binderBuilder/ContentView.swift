@@ -44,7 +44,9 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             guard env.isReady else { return }
             if phase == .active { Task { await env.runAlertChecks() } }
-            if phase == .background, env.settings.icloudSyncEnabled { Task { await env.cloud.push() } }
+            // Guarded push (never from the temporary DB, never over a newer
+            // cloud copy) under a background-task assertion so it can finish.
+            if phase == .background, env.settings.icloudSyncEnabled { env.cloud.pushInBackground() }
         }
         .task {
             #if DEBUG
