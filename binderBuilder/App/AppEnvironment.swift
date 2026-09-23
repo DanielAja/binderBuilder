@@ -131,7 +131,17 @@ final class AppEnvironment {
         wishlist = WishlistStore(database: database)
         groups = GroupStore(database: database)
         binders = BinderStore(database: database, catalog: catalog, isOwned: { collection.isOwned($0) })
-        prices = PriceStore(database: database, catalog: catalog, settings: settings)
+        // eBay active listings are opt-in: PriceStore only calls this once the
+        // user has switched eBay on and pasted keys, and rebuilds it when the
+        // keys change. One limiter for the app keeps the daily budget shared.
+        let ebayLimiter = DailyRateLimiter()
+        prices = PriceStore(
+            database: database, catalog: catalog, settings: settings,
+            makeEbayProvider: { appID, certID in
+                EbayBrowseProvider(
+                    tokenProvider: EbayTokenProvider(appID: appID, certID: certID),
+                    limiter: ebayLimiter)
+            })
         alerts = AlertStore(database: database)
         trades = TradeStore(database: database)
         tradeList = TradeListStore(database: database)
