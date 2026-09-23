@@ -1,14 +1,17 @@
 Most collection apps hand you a spreadsheet. This one hands you a binder.
 
-Open Binder Builder and there's a real binder sitting on the desk in front of you. Pages turn under your finger and settle with weight. Tilt your device and the holo cards catch the light and shift, the way foil actually does. Pull a card off the page to hold it up close, spin it, look at the back. It's your collection on a shelf instead of in a list.
+Open Binder Builder and there's a real binder sitting on the desk in front of you. Pages turn under your finger and settle with weight. Tilt your device and the holo cards catch the light and shift, the way foil actually does. Every rarity gets its own treatment: golds glow gold, rainbow rares ripple with color, illustration rares shimmer edge to edge. Pull a card off the page to hold it up close, spin it, look at the back. It's your collection on a shelf instead of in a list.
 
-Behind that binder is a complete, unofficial fan-made tracker for Pokémon TCG collectors — built by a collector, given away free.
+Behind that binder is a complete, unofficial fan-made tracker for Pokémon TCG collectors, built by a collector and given away free.
 
 TRACK
 Search or browse every set, card by card. Log each copy separately with its own condition and grade, so four copies of the same card can each be what they really are. Watch set completion fill in as you go. Build a wishlist with target prices. Organize anything into custom groups, and see collection stats and a value trend over time.
 
+ARRANGE
+Your binder is yours to curate. Tap any pocket in 3D to place, swap, or remove a card. Sort pages by set, name, value, or rarity in one tap. When it looks right, export the whole binder as a PDF or images to share.
+
 SCAN
-Point the camera at a card and it's recognized on device in about a second, with its price right there — keep going and clear a stack fast. Or photograph a whole binder page and add up to nine cards at once. Recognition happens entirely on your iPhone or iPad; camera frames are never uploaded.
+Point the camera at a card and it's recognized on device in about a second, with its price right there. Keep going and clear a stack fast. Or photograph a whole binder page and add up to nine cards at once. Recognition happens entirely on your iPhone or iPad; camera frames are never uploaded.
 
 PRICES
 Live market data from TCGdex, including TCGplayer market price and Cardmarket trend. Optionally link out to eBay sold listings for a real-world sanity check, or add your own eBay API keys to see active-listing prices from inside the app.
@@ -17,7 +20,7 @@ TRADE
 Log a trade card by card and watch the fairness meter balance as you add to each side, so you know where a deal stands before you shake on it. Keep a running profit-and-loss history of everything you've traded.
 
 ALERTS
-Set a price alert on any card and get notified when it crosses your target, plus optional reminders when a new set releases. Alerts are generated on device — no server, no account, no cost.
+Set a price alert on any card and get notified when it crosses your target, plus optional reminders when a new set releases. Alerts are generated on device. No server, no account, no cost.
 
 BACKUP
 Export your whole collection to a readable JSON file any time, and import it back. Optionally back up to your own private iCloud database and restore it on a new device. Your data is yours; it never passes through anyone else's server.
