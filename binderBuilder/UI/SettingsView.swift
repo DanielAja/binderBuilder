@@ -140,6 +140,10 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Not affiliated with, endorsed, or sponsored by Nintendo, Game Freak, Creatures, or The Pokémon Company. Pokémon and card images are property of their respective owners.")
                     .font(.caption).foregroundStyle(.secondary)
+                // Review Guideline 5.1.1(i) wants the policy reachable from
+                // inside the app, not only from the store listing.
+                Link("Privacy Policy", destination: URL(string: "https://ajadigital.co/privacy")!)
+                Link("Support & Feedback", destination: URL(string: "https://ajadigital.co/feedback")!)
             }
         }
         .navigationTitle("Settings")

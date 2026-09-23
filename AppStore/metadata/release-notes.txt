@@ -9,7 +9,7 @@ Everything else is here from day one, not saved up for a "pro" tier later:
 • Collection stats and value over time
 • Fast camera scanner with live prices, recognized on device
 • Binder-page photo scanning — nine cards at once
-• Live market prices, plus optional eBay sold-listing lookups
+• Live market prices, plus optional eBay active-listing prices
 • Trade logging with a fairness meter and running profit/loss
 • Price-drop and new-release alerts, generated on your device
 • JSON backup and optional private iCloud sync

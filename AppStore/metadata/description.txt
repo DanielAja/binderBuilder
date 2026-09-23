@@ -11,7 +11,7 @@ SCAN
 Point the camera at a card and it's recognized on device in about a second, with its price right there — keep going and clear a stack fast. Or photograph a whole binder page and add up to nine cards at once. Recognition happens entirely on your iPhone or iPad; camera frames are never uploaded.
 
 PRICES
-Live market data from TCGdex, including TCGplayer market price and Cardmarket trend. Optionally link out to eBay sold listings for a real-world sanity check, or add your own eBay API keys for sold-price lookups from inside the app.
+Live market data from TCGdex, including TCGplayer market price and Cardmarket trend. Optionally link out to eBay sold listings for a real-world sanity check, or add your own eBay API keys to see active-listing prices from inside the app.
 
 TRADE
 Log a trade card by card and watch the fairness meter balance as you add to each side, so you know where a deal stands before you shake on it. Keep a running profit-and-loss history of everything you've traded.

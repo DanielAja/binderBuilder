@@ -60,7 +60,7 @@ Every subtype below: **Not collected.**
 ### Location
 | Subtype | Collected? | Note |
 |---|---|---|
-| Precise Location | **No** | No location entitlement of any kind. |
+| Precise Location | **No** | Not *collected*: the optional store finder requests when-in-use location and passes it only to Apple's MapKit local search, on device. Nothing is sent to the developer. |
 | Coarse Location | **No** | |
 
 ### Sensitive Info
