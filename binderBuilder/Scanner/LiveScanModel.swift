@@ -49,6 +49,7 @@ import UIKit
     var destination: Destination = .collection
     var defaultCondition: CardCondition = .nm
     private(set) var addedCount = 0
+    /// USD value of this run's adds (non-USD prices are left out).
     private(set) var addedValue: Double = 0
     var lastActionText: String?
     /// Cards added during this run, waiting to be turned over in the reveal.
@@ -168,7 +169,10 @@ import UIKit
         current.added = true
         locked = current
         addedCount += 1
-        addedValue += current.price?.amount ?? 0
+        // The run total is shown in USD; a card only priced in EUR (a
+        // Cardmarket-only quote) stays out of it rather than being summed as
+        // if the currencies were the same.
+        if let price = current.price, price.currency == "USD" { addedValue += price.amount }
         revealQueue.append(RevealItem(
             cardID: current.card.id,
             name: current.card.name,

@@ -50,18 +50,21 @@ nonisolated final class CameraScanner: NSObject, AVCaptureVideoDataOutputSampleB
         AVCaptureDevice.authorizationStatus(for: .video)
     }
 
-    /// Requests camera permission if needed, then starts the session. Denied /
-    /// no-camera cases are silently ignored (the view shows a fallback).
-    func requestAccessAndStart() {
+    /// Requests camera permission if needed, then starts the session. Returns
+    /// whether access is granted, so the caller can show its fallback when the
+    /// user declines the first-run prompt too — not only when access was
+    /// already off (which used to leave the scanner waiting on a black frame).
+    func requestAccessAndStart() async -> Bool {
         switch Self.authorization {
         case .authorized:
             start()
+            return true
         case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                if granted { self?.start() }
-            }
+            let granted = await AVCaptureDevice.requestAccess(for: .video)
+            if granted { start() }
+            return granted
         default:
-            break
+            return false
         }
     }
 
