@@ -20,7 +20,10 @@ final class LocationAuthority: NSObject {
     }
 
     @ObservationIgnored private let manager = CLLocationManager()
-    @ObservationIgnored private var continuation: CheckedContinuation<CLLocationCoordinate2D, Error>?
+    /// Every caller waiting on the one in-flight fix. A second request while
+    /// one is pending joins it instead of overwriting (and leaking) the first
+    /// caller's continuation and firing a second requestLocation().
+    @ObservationIgnored private var waiters: [CheckedContinuation<CLLocationCoordinate2D, Error>] = []
     @ObservationIgnored private var timeoutTask: Task<Void, Never>?
 
     @ObservationIgnored
@@ -45,10 +48,16 @@ final class LocationAuthority: NSObject {
             throw LocationError.denied
         }
         return try await withCheckedThrowingContinuation { continuation in
-            self.continuation = continuation
+            let alreadyInFlight = !waiters.isEmpty
+            waiters.append(continuation)
+            guard !alreadyInFlight else { return }
             timeoutTask?.cancel()
             timeoutTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(10))
+                // `try?` swallows the cancellation, so without this check a
+                // timer cancelled by a delivered fix would still fire and fail
+                // the NEXT request the moment it started waiting.
+                guard !Task.isCancelled else { return }
                 self?.fail(LocationError.timeout)
             }
             manager.requestLocation()
@@ -57,16 +66,16 @@ final class LocationAuthority: NSObject {
 
     private func resolve(with coordinate: CLLocationCoordinate2D) {
         timeoutTask?.cancel()
-        guard let continuation else { return }
-        self.continuation = nil
-        continuation.resume(returning: coordinate)
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending { waiter.resume(returning: coordinate) }
     }
 
     private func fail(_ error: Error) {
         timeoutTask?.cancel()
-        guard let continuation else { return }
-        self.continuation = nil
-        continuation.resume(throwing: error)
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending { waiter.resume(throwing: error) }
     }
 }
 
