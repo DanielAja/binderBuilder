@@ -21,7 +21,6 @@ The 3D binder
 • Motion sensors only run while the binder is on screen, which saves battery.
 • Reduce Motion is respected: the foil holds still and the camera cuts instead of swooping.
 • VoiceOver can read the binder and turn pages with a swipe up or down.
-• Built for iPhone Duo: the binder's spine sits on the fold.
 
 Plus a link to the privacy policy and support page in Settings.
 
