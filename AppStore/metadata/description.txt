@@ -17,18 +17,18 @@ TRADE
 Log a trade card by card and watch the fairness meter balance as you add to each side, so you know where a deal stands before you shake on it. Keep a running profit-and-loss history of everything you've traded.
 
 ALERTS
-Get notified when a card on your wishlist drops below your target, or when a new set drops. Alerts are generated on device — no server, no account, no cost.
+Set a price alert on any card and get notified when it crosses your target, plus optional reminders when a new set releases. Alerts are generated on device — no server, no account, no cost.
 
 BACKUP
-Export your whole collection to a readable JSON file any time, and import it back. Optionally turn on iCloud sync to keep devices in step through your own private iCloud database. Your data is yours; it never passes through anyone else's server.
+Export your whole collection to a readable JSON file any time, and import it back. Optionally back up to your own private iCloud database and restore it on a new device. Your data is yours; it never passes through anyone else's server.
 
 FREE, AND ACTUALLY FREE
 No account. No sign-up. No ads. No subscription. No paywalled features waiting behind a trial. No analytics, no tracking, no data collection of any kind. Everything described above is in the app the moment you install it.
 
 iPhone and iPad, iOS 18 and later.
 
-Card data and images from TCGdex (tcgdex.dev).
+Card data from TCGdex (tcgdex.dev). Card images are copyright The Pokémon Company.
 
 Prices shown are estimates aggregated from third-party marketplace data. They are not offers to buy or sell, they may be delayed or inaccurate, and they should not be relied on as appraisals.
 
-Binder Builder is an unofficial fan app. Pokémon and Pokémon character names are trademarks of Nintendo, Creatures Inc., and GAME FREAK inc. This app is not affiliated with, endorsed, sponsored, or approved by them.
+Binder Builder is an unofficial fan app. Pokémon and Pokémon character names are trademarks of Nintendo, Creatures Inc., and GAME FREAK inc. This app is not affiliated with, endorsed, sponsored, or approved by Nintendo, Creatures, GAME FREAK, or The Pokémon Company.
