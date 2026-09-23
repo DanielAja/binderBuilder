@@ -52,6 +52,13 @@ final class AppEnvironment {
     /// from anywhere (2D grid, card detail, scans) always reach the scene.
     private(set) var contentToken = 0
 
+    /// The binder `content` currently holds a snapshot of — which can trail
+    /// `openBinderID`: `openBinder` flips the ID first and swaps the snapshot
+    /// only once the rebuild lands. The 3D page pool has to follow THIS, not
+    /// `openBinderID` (rebinding on the ID alone would re-render the old
+    /// binder's pockets and call them the new one's). nil = empty content.
+    private(set) var contentBinderID: String?
+
     /// Bumped when a content rebuild starts, so one that finishes after a newer
     /// rebuild can drop its result instead of overwriting fresher pockets.
     @ObservationIgnored private var contentBuildSeq = 0
@@ -72,6 +79,7 @@ final class AppEnvironment {
         let built = await BinderCardContentBuilder.build(binderID: binderID, store: binders)
         guard seq == contentBuildSeq else { return false }
         content.replace(with: built)
+        contentBinderID = binderID
         contentToken = token
         return true
     }
@@ -80,6 +88,7 @@ final class AppEnvironment {
     private func clearContent() {
         contentBuildSeq += 1
         content.replace(with: BinderCardContent.empty)
+        contentBinderID = nil
         contentToken = binders.changeToken
     }
 
@@ -88,6 +97,8 @@ final class AppEnvironment {
     var scene: SceneModel {
         if let _scene { return _scene }
         let made = SceneModel(content: content, textureCache: textureCache)
+        // Built around whatever `content` holds right now.
+        made.poolBinding.markBound(contentBinderID)
         _scene = made
         return made
     }

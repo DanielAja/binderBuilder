@@ -76,6 +76,23 @@ struct BinderSceneView: View {
     /// Quick export from the 3D view (current spread / whole binder).
     @State private var exporter = BinderExportRunner()
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    /// Between onAppear and onDisappear. The scene outlives this view across
+    /// tab switches, so "is anyone looking?" has to be tracked here.
+    @State private var isVisible = false
+    /// Low Power Mode freezes the foil like Reduce Motion does: CoreMotion
+    /// at 60 Hz for a hue shift is the first thing to give up.
+    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+    /// Mirrors the flip controller's spread for the VoiceOver value.
+    @State private var spreadIndex = 0
+
+    /// True while SwiftUI considers each gesture live. @GestureState resets
+    /// on cancellation too, which onEnded does not report — see
+    /// `settleCancelledGestures`.
+    @GestureState private var dragInFlight = false
+    @GestureState private var pinchInFlight = false
+
     init(env: AppEnvironment) {
         self.env = env
         let scene = env.scene   // cached in AppEnvironment; survives tab switches
@@ -165,6 +182,11 @@ struct BinderSceneView: View {
         // Which binder is open decides which one stands face-out on the shelf
         // (ShelfLayout.binderPlacements), so the row is stale until this fires.
         .onChange(of: env.openBinderID) { refreshShelf() }
+        // "Open in 3D" from another screen swaps the content snapshot without
+        // touching the store's changeToken, so the staleness reconcile below
+        // sees nothing to do. Follow the snapshot's binder instead of the
+        // open ID: the ID flips before the new snapshot lands.
+        .onChange(of: env.contentBinderID) { syncPoolBinding() }
         .overlay {
             if exporter.isRunning {
                 ProgressView("Exporting…", value: exporter.progress)
@@ -180,10 +202,33 @@ struct BinderSceneView: View {
         .onChange(of: env.binders.changeToken) {
             reconcileContentIfStale()
         }
+        .onChange(of: reduceMotion) { applyMotionPolicy() }
+        .onChange(of: lowPower) { applyMotionPolicy() }
+        .onChange(of: scenePhase) { _, phase in
+            // Backgrounding cancels touches without onEnded; settle them
+            // now rather than on return, when the stale state would bite.
+            if phase != .active { settleCancelledGestures() }
+            applyMotionPolicy()
+        }
+        .task {
+            for await _ in NotificationCenter.default.notifications(named: .NSProcessInfoPowerStateDidChange) {
+                lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+            }
+        }
+        .onDisappear {
+            isVisible = false
+            settleCancelledGestures()
+            applyMotionPolicy()
+        }
         .onAppear {
+            isVisible = true
+            applyMotionPolicy()
             // Edits can land while this tab is unmounted (2D grid, card
             // detail, scans) — catch up before the first frame shows.
             reconcileContentIfStale()
+            // …and so can a binder switch ("Open in 3D" from the binder's
+            // settings), whose onChange never fired while we were gone.
+            syncPoolBinding()
             wireShelfCallbacks()
             refreshShelf()
             // The scene (and its rig) outlives this view across tab switches.
@@ -198,6 +243,12 @@ struct BinderSceneView: View {
             // pull/return, gesture-driven or programmatic (debug auto-pull
             // included), so the bar never needs bespoke bookkeeping per path.
             model.result.cardInteraction?.onFloatingChanged = { ref in floatingRef = ref }
+            // The callback only reports changes, and this view's @State
+            // started over when the tab came back (3D -> Grid -> 3D) while the
+            // scene — and a card still floating in it — did not.
+            floatingRef = model.result.cardInteraction?.floatingRef
+            model.result.controller?.onSpreadChanged = { spread in spreadIndex = spread }
+            spreadIndex = model.result.controller?.spreadIndex ?? 0
             if DebugLaunchState.launchFlag("-showScan") { debugScan = true }
             // -editPockets: open the binder straight into pocket-edit mode, so
             // the edit affordances can be screenshot-verified.
@@ -235,6 +286,7 @@ struct BinderSceneView: View {
                 // open/pull-out/return. Shelf: drag orbits the camera. Binder:
                 // drag flips a page or (while a card floats) spins it.
                 DragGesture(minimumDistance: 8)
+                    .updating($dragInFlight) { _, inFlight, _ in inFlight = true }
                     .onChanged { value in
                         if zoomActive { return }
                         if sceneMode == .shelf {
@@ -275,12 +327,22 @@ struct BinderSceneView: View {
                 // distance, so the shelf orbit and the open binder's angle are
                 // preserved — only the dolly moves.
                 MagnifyGesture(minimumScaleDelta: 0.01)
+                    .updating($pinchInFlight) { _, inFlight, _ in inFlight = true }
                     .onChanged { value in
-                        if !zoomActive { beginZoom(viewport: proxy.size) }
+                        if !zoomActive {
+                            // A floating card is pinned a fixed distance in
+                            // front of where the camera WAS; dollying past it
+                            // puts it behind the lens (or fills the screen
+                            // with its edge). Inspecting a card is its own
+                            // zoom, so the pinch simply stands down.
+                            if model.result.cardInteraction?.isFloating == true { return }
+                            beginZoom(viewport: proxy.size)
+                        }
                         model.result.cameraRig.updateZoom(magnification: value.magnification)
                         zoomLevel = model.result.cameraRig.zoom
                     }
                     .onEnded { _ in
+                        guard zoomActive else { return }
                         model.result.cameraRig.endZoom()
                         zoomLevel = model.result.cameraRig.zoom
                         zoomActive = false
@@ -306,7 +368,55 @@ struct BinderSceneView: View {
                         sceneMode = model.result.modeController?.mode ?? sceneMode
                     }
             )
+            // Cancellation resets @GestureState but never calls onEnded.
+            .onChange(of: dragInFlight) { _, live in if !live { settleCancelledGesturesLater() } }
+            .onChange(of: pinchInFlight) { _, live in if !live { settleCancelledGesturesLater() } }
+            // VoiceOver: the scene is one element. In the binder, swipe
+            // up/down turns pages (the same drag -> spring path a finger
+            // takes); on the shelf, the rotor's actions open each binder.
+            .accessibilityElement()
+            .accessibilityLabel(sceneAccessibilityLabel)
+            .accessibilityValue(sceneAccessibilityValue)
+            .accessibilityAdjustableAction { direction in
+                guard sceneMode != .shelf, let controller = model.result.controller else { return }
+                let forward: Bool
+                switch direction {
+                case .increment: forward = true
+                case .decrement: forward = false
+                @unknown default: return
+                }
+                guard controller.flip(forward: forward) else { return }
+                // The spread only advances once the spring settles, so say
+                // where we're going now rather than read out where we were.
+                let upcoming = controller.spreadIndex + (forward ? 1 : -1)
+                AccessibilityNotification.Announcement(
+                    SceneAccessibility.spreadDescription(
+                        spread: upcoming, sheetCount: controller.sheetCount)
+                ).post()
+            }
+            .accessibilityActions {
+                if sceneMode == .shelf {
+                    ForEach(env.binders.binders, id: \.id) { binder in
+                        Button("Open \(binder.name)") { openBinderFromShelf(binder.id) }
+                    }
+                }
+            }
         }
+    }
+
+    private var sceneAccessibilityLabel: String {
+        if sceneMode == .shelf { return "Binder shelf" }
+        let name = env.binders.binders.first { $0.id == env.contentBinderID }?.name
+        return name.map { "\($0), open binder" } ?? "Open binder"
+    }
+
+    private var sceneAccessibilityValue: String {
+        if sceneMode == .shelf {
+            let count = env.binders.binders.count
+            return "\(count) binder\(count == 1 ? "" : "s")"
+        }
+        return SceneAccessibility.spreadDescription(
+            spread: spreadIndex, sheetCount: model.result.controller?.sheetCount ?? 0)
     }
 
     /// Stages the camera and dresses the binder for the fold we're in.
@@ -323,6 +433,51 @@ struct BinderSceneView: View {
             depth: dressing.gutterDepth,
             width: dressing.gutterWidth
         )
+    }
+
+    // MARK: Motion + gesture lifecycle
+
+    /// Pushes Reduce Motion / Low Power into the scene and decides whether
+    /// CoreMotion should be running at all: only while this view is on
+    /// screen, the app is frontmost, and the foil is actually allowed to move.
+    private func applyMotionPolicy() {
+        let frozen = reduceMotion || lowPower
+        MotionUpdateSystem.motionReduced = frozen
+        // Camera and card flights answer to Reduce Motion only — Low Power
+        // Mode is about the sensor stream, not about how transitions look.
+        model.result.cameraRig.reduceMotion = reduceMotion
+        model.result.cardInteraction?.reduceMotion = reduceMotion
+        let wantsMotion = isVisible && scenePhase == .active && !frozen
+        if wantsMotion {
+            model.result.motionProvider.start()
+        } else {
+            model.result.motionProvider.stop()
+        }
+    }
+
+    /// One run-loop hop later: when a gesture ends normally, onEnded and the
+    /// @GestureState reset land in the same update in no documented order,
+    /// and settling first would release a flick with zero velocity. After the
+    /// hop, a normally-ended gesture has already reset everything and this is
+    /// a no-op; a cancelled one gets cleaned up.
+    private func settleCancelledGesturesLater() {
+        Task { @MainActor in settleCancelledGestures() }
+    }
+
+    /// Clears whatever a gesture that never reached onEnded left behind: a
+    /// pinch that still gates every other gesture, a shelf pan flag, a page
+    /// hanging mid-curl with the router still tracking it, a card pinned
+    /// under a finger that has gone. Every step is idempotent.
+    private func settleCancelledGestures() {
+        if zoomActive && !pinchInFlight {
+            model.result.cameraRig.endZoom()
+            zoomLevel = model.result.cameraRig.zoom
+            zoomActive = false
+        }
+        guard !dragInFlight else { return }
+        panActive = false
+        model.result.router?.cancel()
+        model.result.cardInteraction?.cancelDrag()
     }
 
     // MARK: Zoom
@@ -672,7 +827,9 @@ struct BinderSceneView: View {
         Haptics.impact(.medium)
         openingFromShelf = true
         let entity = model.result.shelfController?.binderEntity(id: binderID)
-        if let entity {
+        // Reduce Motion: skip the pull-and-turn; the (short) crossfade alone
+        // carries the change.
+        if let entity, !reduceMotion {
             var transform = entity.transform
             transform.translation += SIMD3<Float>(0, 0.015, 0.12)
             transform.rotation = simd_quatf(angle: 0.18, axis: SIMD3<Float>(0, 1, 0)) * transform.rotation
@@ -686,6 +843,9 @@ struct BinderSceneView: View {
                 // card's pocket reads empty and rebind spawns a duplicate.
                 model.result.cardInteraction?.snapFloatingCardHome()
                 controller.rebind(spread: controller.sheetCount / 2)
+                // Record it, so the contentBinderID observer (held off by
+                // `openingFromShelf` meanwhile) doesn't rebind a second time.
+                model.poolBinding.markBound(env.contentBinderID)
             }
             modeController.enterBinder()
             sceneMode = .binderOpen
@@ -756,9 +916,35 @@ struct BinderSceneView: View {
                 // CardPlacementSystem.sync indexes page.children, so a floating
                 // card's pocket reads empty and rebind spawns a duplicate.
                 model.result.cardInteraction?.snapFloatingCardHome()
-                controller.rebind(spread: controller.spreadIndex)
+                if model.poolBinding.needsRebind(for: env.contentBinderID) {
+                    // The reconcile re-pointed us at another binder (the
+                    // open one was deleted): start it at its middle, as
+                    // any other binder switch does.
+                    controller.rebind(spread: controller.sheetCount / 2)
+                    model.poolBinding.markBound(env.contentBinderID)
+                } else {
+                    controller.rebind(spread: controller.spreadIndex)
+                }
             }
         }
+    }
+
+    /// Rebinds the page pool when the content snapshot now belongs to a
+    /// different binder than the one the pool last rendered. The flip
+    /// controller reads the live content holder, so nothing else notices a
+    /// swap: without this the pages keep showing binder A while pocket edits
+    /// (addressed by `env.openBinderID`) write into binder B.
+    private func syncPoolBinding() {
+        // The shelf-open path rebinds (and records it) itself once its
+        // content lands; stepping in mid-transition would double up.
+        guard !openingFromShelf,
+              model.poolBinding.needsRebind(for: env.contentBinderID),
+              let controller = model.result.controller else { return }
+        // Same reason as every other rebind: an out-of-pocket card would be
+        // duplicated, or stranded over the wrong binder.
+        model.result.cardInteraction?.snapFloatingCardHome()
+        controller.rebind(spread: controller.sheetCount / 2)
+        model.poolBinding.markBound(env.contentBinderID)
     }
 
     @ViewBuilder
@@ -786,6 +972,9 @@ struct BinderSceneView: View {
 @Observable
 final class SceneModel {
     let result: SceneBootstrapResult
+    /// Which binder the page pool last rebound against. Bookkeeping, not UI
+    /// state — observing it would only re-render the view for nothing.
+    @ObservationIgnored var poolBinding = PoolBinding()
 
     init(content: (any CardContentProviding)?, textureCache: CardTextureCache?) {
         // Real content always drives the scene — an empty binder renders as
@@ -796,5 +985,42 @@ final class SceneModel {
         let usableContent: (any CardContentProviding)? =
             DebugLaunchState.launchFlag("-debugContent") ? nil : content
         result = SceneBootstrap.assemble(cardContent: usableContent, textureCache: textureCache)
+    }
+}
+
+/// Which binder's content the 3D page pool is currently rendering. The pool
+/// reads a live content holder that is swapped in place, so it can't tell by
+/// itself that the holder now describes a different binder; this is the
+/// record every rebind path checks and updates.
+nonisolated struct PoolBinding: Equatable, Sendable {
+    /// nil for empty content (no binders at all) — and before the first mark.
+    private(set) var binderID: String?
+    private var hasBound = false
+
+    /// True when the content now belongs to a different binder than the one
+    /// last rebound — including the very first time, before anything was.
+    func needsRebind(for contentBinderID: String?) -> Bool {
+        !hasBound || binderID != contentBinderID
+    }
+
+    mutating func markBound(_ contentBinderID: String?) {
+        binderID = contentBinderID
+        hasBound = true
+    }
+}
+
+/// VoiceOver wording for the 3D scene. Pure so it can be tested.
+nonisolated enum SceneAccessibility {
+    /// "Pages 3–4 of 10" for an open spread. The app calls a sheet a "page"
+    /// everywhere else (Add Page, Remove Page 3), so this counts sheets: the
+    /// spread at `spread` shows the back of sheet `spread - 1` on the left
+    /// and the front of sheet `spread` on the right, and at either end only
+    /// one sheet is showing.
+    static func spreadDescription(spread: Int, sheetCount: Int) -> String {
+        guard sheetCount > 0 else { return "No pages" }
+        let s = min(max(spread, 0), sheetCount)
+        if s == 0 { return "Page 1 of \(sheetCount)" }
+        if s == sheetCount { return "Page \(sheetCount) of \(sheetCount), back" }
+        return "Pages \(s)–\(s + 1) of \(sheetCount)"
     }
 }
