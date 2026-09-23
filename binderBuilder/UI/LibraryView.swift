@@ -14,6 +14,9 @@ struct SearchView: View {
 
     @State private var ownFilter: OwnFilter = .all
     @State private var sort: SortMode = .relevance
+    /// A swipe-to-remove that would delete more than a lone raw copy waits
+    /// here for confirmation (see CollectionStore.removalNeedsConfirmation).
+    @State private var pendingRemoval: CardSummary?
 
     enum OwnFilter: String, CaseIterable { case all = "All", owned = "Owned", missing = "Missing", wishlist = "Wishlist" }
     enum SortMode: String, CaseIterable { case relevance = "Relevance", name = "Name", rarity = "Rarity" }
@@ -90,6 +93,18 @@ struct SearchView: View {
             }
         }
         .navigationTitle("Search")
+        .confirmationDialog(
+            pendingRemoval.map {
+                "Remove \(CollectionStore.copiesPhrase(env.collection.allCopies(ofCardID: $0.id))) of \($0.name)?"
+            } ?? "",
+            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
+            titleVisibility: .visible, presenting: pendingRemoval
+        ) { card in
+            Button("Remove from collection", role: .destructive) { removeAllCopies(of: card); haptic() }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Every copy of this card, graded ones included, is deleted with its condition, price, and notes. This can't be undone.")
+        }
         .navigationDestination(for: CardSummary.self) { CardDetailView(card: $0, env: env) }
     }
 
@@ -100,11 +115,18 @@ struct SearchView: View {
     }
     private func toggleOwned(_ card: CardSummary) {
         if isOwned(card) {
-            for v in CardVariant.allCases { env.collection.setOwned(CardRef(cardID: card.id, variant: v), quantity: 0) }
+            if CollectionStore.removalNeedsConfirmation(env.collection.allCopies(ofCardID: card.id)) {
+                pendingRemoval = card
+                return
+            }
+            removeAllCopies(of: card)
         } else {
             env.collection.setOwned(primaryRef(card), quantity: 1)
         }
         haptic()
+    }
+    private func removeAllCopies(of card: CardSummary) {
+        for v in CardVariant.allCases { env.collection.setOwned(CardRef(cardID: card.id, variant: v), quantity: 0) }
     }
     private func haptic() { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
 }

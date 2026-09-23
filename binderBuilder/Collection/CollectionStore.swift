@@ -144,6 +144,29 @@ import os
         }
     }
 
+    // MARK: - Un-owning a whole card
+
+    /// Every copy of a card across all its printings.
+    func allCopies(ofCardID cardID: String) -> [CardCopy] {
+        CardVariant.allCases.flatMap { copiesByRef[CardRef(cardID: cardID, variant: $0)] ?? [] }
+    }
+
+    /// Whether un-owning these copies needs a confirmation first. A lone raw
+    /// copy with nothing recorded on it is a one-tap toggle (tap again to get
+    /// it back); anything else — several copies, a graded slab, a purchase
+    /// price or notes — would be lost for good.
+    nonisolated static func removalNeedsConfirmation(_ copies: [CardCopy]) -> Bool {
+        guard copies.count == 1, let only = copies.first else { return copies.count > 1 }
+        return only.isGraded || only.acquiredPrice != nil || !(only.notes ?? "").isEmpty
+    }
+
+    /// "3 copies (1 graded)" — names what a removal dialog is about to delete.
+    nonisolated static func copiesPhrase(_ copies: [CardCopy]) -> String {
+        let graded = copies.filter(\.isGraded).count
+        let base = copies.count == 1 ? "1 copy" : "\(copies.count) copies"
+        return graded > 0 ? "\(base) (\(graded) graded)" : base
+    }
+
     // MARK: - Helpers
 
     private func removeAllCopies(of ref: CardRef) {

@@ -19,6 +19,10 @@ struct ScanView: View {
     @State private var matcher: CardHashMatcher?
     @State private var results: [ScanSlotResult] = []
     @State private var names: [String: String] = [:]
+    /// The printing each shortlisted card saves as — its primary variant, the
+    /// same pick the fast scanner makes, so a holo-only card isn't recorded as
+    /// a `.normal` printing that doesn't exist.
+    @State private var variants: [String: CardVariant] = [:]
     @State private var busy = false
     /// Where the scanned cards land: an existing binder, or (nil) a fresh
     /// "Scanned Page" binder — the original behavior stays the default.
@@ -139,8 +143,19 @@ struct ScanView: View {
     private func resolveNames() async {
         let ids = Set(results.flatMap { $0.matches.map(\.cardID) })
         for id in ids where names[id] == nil {
-            if let detail = try? await env.catalog?.card(id: id) { names[id] = detail.name }
+            if let detail = try? await env.catalog?.card(id: id) {
+                names[id] = detail.name
+                variants[id] = LiveScanModel.primaryVariant(of: detail.summary)
+            }
         }
+    }
+
+    /// Records the scanned card as owned without touching existing copies.
+    /// `setOwned(ref, quantity: 1)` here used to trim a printing the user
+    /// already owned several of (graded ones included) down to one.
+    private func markOwned(_ ref: CardRef) {
+        guard !env.collection.isOwned(ref) else { return }
+        env.collection.addCopy(ref, condition: .nm)
     }
 
     private func commit() {
@@ -157,10 +172,10 @@ struct ScanView: View {
             env.binders.commitBatch { binders in
                 for slot in results {
                     guard let match = slot.chosen else { continue }
-                    let ref = CardRef(cardID: match.cardID, variant: .normal)
+                    let ref = CardRef(cardID: match.cardID, variant: variants[match.cardID] ?? .normal)
                     if let empty = binders.firstEmptySlot(binderID: binderID) {
                         binders.assign(ref, to: empty)
-                        env.collection.setOwned(ref, quantity: 1)
+                        markOwned(ref)
                     } else {
                         overflow += 1
                     }
@@ -177,11 +192,11 @@ struct ScanView: View {
         env.binders.commitBatch { binders in
             for slot in results {
                 guard let match = slot.chosen else { continue }
-                let ref = CardRef(cardID: match.cardID, variant: .normal)
+                let ref = CardRef(cardID: match.cardID, variant: variants[match.cardID] ?? .normal)
                 binders.assign(ref, to: SlotLocation(
                     binderID: binder.id, pageIndex: 0, side: .front, slotIndex: slot.slotIndex
                 ))
-                env.collection.setOwned(ref, quantity: 1)
+                markOwned(ref)
             }
         }
     }
