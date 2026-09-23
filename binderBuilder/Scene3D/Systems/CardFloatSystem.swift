@@ -114,11 +114,11 @@ final class CardFloatSystem: System {
             }
 
             // Position: critically-damped spring (root-local == world).
-            var pos = entity.position
-            let omega = Self.positionOmega
-            let accel = omega * omega * (f.targetPosition - pos) - 2 * omega * f.velocity
-            f.velocity += accel * dt
-            pos += f.velocity * dt
+            let step = Self.springStep(
+                position: entity.position, velocity: f.velocity,
+                target: f.targetPosition, omega: Self.positionOmega, dt: dt)
+            let pos = step.position
+            f.velocity = step.velocity
             entity.position = pos
 
             if f.userControlled {
@@ -147,8 +147,36 @@ final class CardFloatSystem: System {
         for (entity, f) in finished { Self.finalizeReturn(entity, f) }
     }
 
+    /// One exact step of a critically damped spring toward a fixed target —
+    /// the same closed form as FlipSpring.step, per axis. The explicit Euler
+    /// step this replaces goes unstable once omega*dt passes 2*sqrt(2) - 2
+    /// (~0.83: dt > ~64 ms at omega 13, and ringing well before that), which
+    /// is exactly the frame a card pull-out can land on after a hitch —
+    /// backgrounding, a texture upload, the first frame after a tab switch —
+    /// and it flung the card off into space. The closed form is unconditionally
+    /// stable: any dt decays toward the target, a huge one simply arrives.
+    nonisolated static func springStep(
+        position: SIMD3<Float>,
+        velocity: SIMD3<Float>,
+        target: SIMD3<Float>,
+        omega: Float,
+        dt: Float
+    ) -> (position: SIMD3<Float>, velocity: SIMD3<Float>) {
+        guard dt > 0, dt.isFinite else { return (position, velocity) }
+        let x0 = position - target
+        let b = velocity + omega * x0
+        let e = exp(-omega * dt)
+        return (
+            target + (x0 + b * dt) * e,
+            (b - omega * (x0 + b * dt)) * e
+        )
+    }
+
     /// Reparents a returned card under its page and restores pocket control.
-    private static func finalizeReturn(_ entity: Entity, _ f: CardFloatComponent) {
+    /// Shared with CardInteractionController.snapFloatingCardHome, so the
+    /// animated and the instant way home can never disagree about where
+    /// "home" is.
+    static func finalizeReturn(_ entity: Entity, _ f: CardFloatComponent) {
         entity.components.remove(CardFloatComponent.self)
         if let parent = f.homeParent {
             parent.addChild(entity) // keep current world transform irrelevant; reset below

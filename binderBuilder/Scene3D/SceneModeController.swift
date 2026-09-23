@@ -63,7 +63,7 @@ final class SceneModeController {
     func enterBinder() {
         guard mode == .shelf else { return }
         mode = .binderOpen
-        crossfade(hide: shelfRoot, show: binderRoot)
+        crossfade(hide: shelfRoot, show: binderRoot, duration: crossfadeDuration)
         cameraRig.animate(to: .binderOpen)
         onEnterBinder?()
         Self.log.info("Entered binder")
@@ -74,10 +74,16 @@ final class SceneModeController {
         mode = .shelf
         shelfYaw = 0
         shelfPitch = 0
-        crossfade(hide: binderRoot, show: shelfRoot)
+        crossfade(hide: binderRoot, show: shelfRoot, duration: crossfadeDuration)
         cameraRig.animate(to: .shelf)
         Self.log.info("Returned to shelf")
     }
+
+    /// Under Reduce Motion the camera cuts instead of dollying (see
+    /// CameraRig.reduceMotion), so the crossfade is all that is left of the
+    /// transition — keep it, but short: a dissolve is the recommended
+    /// replacement for motion, a lingering one just reads as lag.
+    private var crossfadeDuration: TimeInterval { cameraRig.reduceMotion ? 0.2 : 0.35 }
 
     /// Fades the outgoing root out while the incoming one fades in, riding
     /// the camera dolly — replaces the old hard isEnabled cut. Falls back to

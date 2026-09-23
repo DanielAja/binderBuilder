@@ -179,6 +179,18 @@ final class GestureRouter {
         )
     }
 
+    /// The drag went away without `dragEnded` — SwiftUI skips onEnded when a
+    /// gesture is cancelled (an incoming call, Control Center, the tab
+    /// switching away). Without this the router stays in `.tracking`, the
+    /// next touch resumes a flip that no longer exists, and the page hangs
+    /// mid-curl in `.dragging` because nothing ever releases it. Let the page
+    /// fall to whichever side it is nearer, with no flick. Idempotent.
+    func cancel() {
+        defer { state = .idle }
+        guard case .tracking = state else { return }
+        controller.releaseActiveDrag()
+    }
+
     private func begin(at point: CGPoint, slopX: CGFloat, viewport: CGSize) {
         guard viewport.width > 0, viewport.height > 0 else {
             state = .rejected

@@ -89,6 +89,13 @@ final class CardPlacement {
 
     private let provider: any CardContentProviding
     private let textures: CardTextureCache
+    /// Cards with an art load running. A rebind re-asks for art on every
+    /// seated card still showing the placeholder (a load that failed while
+    /// offline has to be retried SOMEWHERE); this keeps a burst of rebinds
+    /// from stacking a second load on one that is still out. Rebinds are
+    /// per settled flip / content change, never per frame, and the image
+    /// cache negative-caches failures, so retries stay cheap.
+    private var artInFlight: Set<Entity.ID> = []
 
     init(provider: any CardContentProviding, textures: CardTextureCache) {
         self.provider = provider
@@ -136,6 +143,10 @@ final class CardPlacement {
             case (.some(let render), .some(let entity)):
                 if entity.components[CardSlotComponent.self]?.ref == render.ref {
                     CardFactory.setOwnership(entity, owned: render.owned, variant: render.ref.variant)
+                    // Same card as before — but if its art never arrived (the
+                    // fetch failed, e.g. offline at spawn), this is the retry.
+                    // loadArt is a no-op once the art is bound.
+                    loadArt(into: entity, render: render)
                 } else {
                     entity.removeFromParent()
                     spawn(render, slot: slot, side: side, on: page)
@@ -161,8 +172,12 @@ final class CardPlacement {
 
     private func loadArt(into card: ModelEntity, render: CardSlotRender) {
         if card.components[CardSlotComponent.self]?.hasArt == true { return }
-        Task { [weak card, textures] in
-            guard let texture = try? await textures.load(render.ref, imageBase: render.imageBase, pinned: render.owned),
+        let token = card.id
+        guard artInFlight.insert(token).inserted else { return }
+        Task { [weak self, weak card, textures] in
+            let loaded = try? await textures.load(render.ref, imageBase: render.imageBase, pinned: render.owned)
+            self?.artInFlight.remove(token)
+            guard let texture = loaded,
                   let card, var comp = card.components[CardSlotComponent.self], comp.ref == render.ref
             else { return }
             CardFactory.updateFront(

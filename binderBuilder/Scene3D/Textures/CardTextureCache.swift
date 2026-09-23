@@ -4,10 +4,16 @@
 //
 //  Bridges the ImageCache (CGImage source of truth, shared with the 2D UI) to
 //  RealityKit TextureResources for the 3D card surfaces. An LRU keyed by
-//  CardRef keeps at most `capacity` GPU textures resident (~2.6 MB each at
+//  card ID keeps at most `capacity` GPU textures resident (~2.6 MB each at
 //  600x825 BGRA8 + mips, so ~125 MB at the default capacity of 48, halved to
 //  24 on memory-constrained devices). In-flight loads are deduplicated so the
 //  same card requested by several pockets/spreads only decodes once.
+//
+//  Keyed by card ID, not CardRef: the art is fetched by card ID alone (every
+//  printing of a card shares one image — the variant is a shader treatment
+//  on top), so keying by ref uploaded the SAME pixels once per variant, and
+//  a normal + holo pair of one card held two identical textures resident
+//  and evicted real neighbours to make room.
 //
 //  Synchronous `cached(_:)` returns an already-resident texture (or nil) so
 //  the placement coordinator can pose a card immediately; `load(_:imageBase:)`
@@ -27,10 +33,10 @@ final class CardTextureCache {
     let quality: ImageQuality
     private let capacity: Int
 
-    private var lru: [CardRef: TextureResource] = [:]
-    /// Most-recently-used last.
-    private var order: [CardRef] = []
-    private var inFlight: [CardRef: Task<TextureResource, Error>] = [:]
+    private var lru: [String: TextureResource] = [:]
+    /// Card IDs, most-recently-used last.
+    private var order: [String] = []
+    private var inFlight: [String: Task<TextureResource, Error>] = [:]
 
     /// Shared placeholder shown while art loads or when a card has no image.
     private(set) lazy var placeholder: TextureResource = Self.makePlaceholder()
@@ -49,44 +55,46 @@ final class CardTextureCache {
     /// A resident texture for `ref`, or nil if it hasn't been loaded yet.
     /// Marks it most-recently-used.
     func cached(_ ref: CardRef) -> TextureResource? {
-        guard let texture = lru[ref] else { return nil }
-        touch(ref)
+        let key = ref.cardID
+        guard let texture = lru[key] else { return nil }
+        touch(key)
         return texture
     }
 
     /// Loads (or returns the resident) texture for a card. Deduplicates
-    /// concurrent requests for the same ref.
+    /// concurrent requests for the same card, whatever the variant.
     func load(_ ref: CardRef, imageBase: String?, pinned: Bool = false) async throws -> TextureResource {
         if let texture = cached(ref) { return texture }
-        if let task = inFlight[ref] { return try await task.value }
+        let key = ref.cardID
+        if let task = inFlight[key] { return try await task.value }
 
         let task = Task { [imageCache, quality] in
             let image = try await imageCache.image(
-                for: ref.cardID, imageBase: imageBase, quality: quality, pinned: pinned
+                for: key, imageBase: imageBase, quality: quality, pinned: pinned
             )
             return try await TextureResource(image: image, options: .init(semantic: .color))
         }
-        inFlight[ref] = task
-        defer { inFlight[ref] = nil }
+        inFlight[key] = task
+        defer { inFlight[key] = nil }
         let texture = try await task.value
-        insert(ref, texture)
+        insert(key, texture)
         return texture
     }
 
     // MARK: LRU bookkeeping
 
-    private func insert(_ ref: CardRef, _ texture: TextureResource) {
-        lru[ref] = texture
-        touch(ref)
+    private func insert(_ key: String, _ texture: TextureResource) {
+        lru[key] = texture
+        touch(key)
         while order.count > capacity {
             let evicted = order.removeFirst()
             lru[evicted] = nil
         }
     }
 
-    private func touch(_ ref: CardRef) {
-        if let existing = order.firstIndex(of: ref) { order.remove(at: existing) }
-        order.append(ref)
+    private func touch(_ key: String) {
+        if let existing = order.firstIndex(of: key) { order.remove(at: existing) }
+        order.append(key)
     }
 
     var residentCount: Int { lru.count }
