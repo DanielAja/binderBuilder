@@ -186,7 +186,7 @@ struct BinderExportPureTests {
         // Sheet 0 front + back, then sheet 1 front — sheet 2 is trimmed away.
         #expect(pages.count == 3)
 
-        let job = BinderExportJob(binderName: binder.name, pages: pages, images: [:])
+        let job = BinderExportJob(binderName: binder.name, pages: pages, art: [:])
         let data = BinderExport.pdfData(job)
         let document = try #require(
             CGDataProvider(data: data as CFData).flatMap(CGPDFDocument.init))
@@ -204,7 +204,7 @@ struct BinderExportPureTests {
 
         let pages = BinderExport.printablePages(
             await BinderExport.pages(binderID: binder.id, store: binders))
-        let job = BinderExportJob(binderName: binder.name, pages: pages, images: [:])
+        let job = BinderExportJob(binderName: binder.name, pages: pages, art: [:])
         let urls = try BinderExport.writePNGs(job)
         defer { urls.first.map { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) } }
 
@@ -231,7 +231,7 @@ struct BinderExportPureTests {
             scope: .side(pageIndex: 1, side: .front))
         #expect(pages.count == 1)
 
-        let job = BinderExportJob(binderName: binder.name, pages: pages, images: [:])
+        let job = BinderExportJob(binderName: binder.name, pages: pages, art: [:])
         let urls = try BinderExport.writeImages(job, format: .jpegs)
         defer { urls.first.map { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) } }
 
