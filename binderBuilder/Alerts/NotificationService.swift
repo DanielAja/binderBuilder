@@ -63,3 +63,18 @@ enum NotificationService {
         center.removePendingNotificationRequests(withIdentifiers: ids)
     }
 }
+
+/// Lets notifications show while the app is open. Without a delegate iOS
+/// silently drops a local notification that fires in the foreground — and
+/// the alert checks run exactly then (on activation / "Check now"). Installed
+/// in binderBuilderApp.init, before any notification can fire; the center
+/// holds its delegate weakly, hence the shared instance.
+nonisolated final class ForegroundNotificationDelegate: NSObject, UNUserNotificationCenterDelegate, Sendable {
+    static let shared = ForegroundNotificationDelegate()
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound, .list]
+    }
+}

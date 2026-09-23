@@ -85,7 +85,14 @@ struct SettingsView: View {
             } footer: {
                 Text("Drops are release-date reminders, not live stock alerts — no free app can see what is actually on a store's shelf. We remind you what is coming and where you saved stores to look.")
             }
-            .onChange(of: settings.dropAlertsEnabled) { _, on in if on { Task { await NotificationService.requestAuthorization() } } }
+            // Reconcile both ways: on schedules the reminders right away, off
+            // cancels the ones already pending instead of leaving them to fire.
+            .onChange(of: settings.dropAlertsEnabled) { _, on in
+                Task {
+                    if on { await NotificationService.requestAuthorization() }
+                    await DropScheduler.reconcile(env: env)
+                }
+            }
 
             Section {
                 if backupBusy {
