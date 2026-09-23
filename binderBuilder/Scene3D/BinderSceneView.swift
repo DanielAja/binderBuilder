@@ -50,6 +50,10 @@ struct BinderSceneView: View {
     @State private var zoomActive = false
     /// Mirrors the rig's zoom so the reset control can appear when it matters.
     @State private var zoomLevel: Float = 1
+    /// Width the top row actually gets. The 3D/Grid toggle floats over its
+    /// middle (BinderTabView), so the labelled buttons only fit when there's
+    /// room either side of it — see `topRowIsCompact`.
+    @State private var controlsWidth: CGFloat = 0
     /// True from the shelf tap until the crossfade has hidden the shelf, so
     /// nothing rebuilds the row out from under the pull-out animation.
     @State private var openingFromShelf = false
@@ -541,10 +545,13 @@ struct BinderSceneView: View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
                 if sceneMode != .shelf {
-                    shelfButton
-                    Spacer()
-                    if !editMode && !binderNeedsPages { shareButton }
-                    editButton
+                    Group {
+                        shelfButton
+                        Spacer()
+                        if !editMode && !binderNeedsPages { shareButton }
+                        editButton
+                    }
+                    .labelStyle(TopRowLabelStyle(iconOnly: topRowIsCompact))
                 } else {
                     Spacer()
                 }
@@ -578,6 +585,16 @@ struct BinderSceneView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, bottomControlInset)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { controlsWidth = $0 }
+    }
+
+    /// Shelf and Edit drop to icons when their labels would run under the
+    /// floating 3D/Grid toggle. Labelled, the row needs ~430pt with the toggle
+    /// centred (a 375pt iPhone SE, or iPhone Duo's outer display beside its
+    /// vertical tab bar, is narrower); in book pose the toggle moves onto the
+    /// leading panel and sits right where a labelled Shelf button would be.
+    private var topRowIsCompact: Bool {
+        controlsWidth < 430 || fold.pose == .book
     }
 
     private var shelfButton: some View {
@@ -1022,5 +1039,19 @@ nonisolated enum SceneAccessibility {
         if s == 0 { return "Page 1 of \(sheetCount)" }
         if s == sheetCount { return "Page \(sheetCount) of \(sheetCount), back" }
         return "Pages \(s)–\(s + 1) of \(sheetCount)"
+    }
+}
+
+/// Title-and-icon normally, icon-only when the top row is short on room. The
+/// title stays as the accessibility label either way.
+private struct TopRowLabelStyle: LabelStyle {
+    let iconOnly: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        if iconOnly {
+            configuration.icon
+        } else {
+            Label(configuration)
+        }
     }
 }
