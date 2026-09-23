@@ -49,6 +49,7 @@ import UIKit
     var destination: Destination = .collection
     var defaultCondition: CardCondition = .nm
     private(set) var addedCount = 0
+    /// USD value of this run's adds (non-USD prices are left out).
     private(set) var addedValue: Double = 0
     var lastActionText: String?
     /// Cards added during this run, waiting to be turned over in the reveal.
@@ -99,7 +100,10 @@ import UIKit
         guard let matcher else { return }
         // A chosen photo isn't the preview, so the crop uses frame limits only.
         let matches = await Self.matches(in: frame, viewSize: .zero, using: matcher)
-        guard let top = matches.first, top.confidence >= 0.5 else {
+        // Same floor as the live stream. This used to be 0.5 (32 bits — a coin
+        // flip, so it accepted whatever card happened to be nearest) because
+        // the upside-down dHash put even correct matches ~25 bits away.
+        guard let top = matches.first, top.confidence >= ScanStabilizer.defaultMinConfidence else {
             lastActionText = "No card recognized — try a clearer photo."
             clearActionSoon()
             return
@@ -165,7 +169,10 @@ import UIKit
         current.added = true
         locked = current
         addedCount += 1
-        addedValue += current.price?.amount ?? 0
+        // The run total is shown in USD; a card only priced in EUR (a
+        // Cardmarket-only quote) stays out of it rather than being summed as
+        // if the currencies were the same.
+        if let price = current.price, price.currency == "USD" { addedValue += price.amount }
         revealQueue.append(RevealItem(
             cardID: current.card.id,
             name: current.card.name,

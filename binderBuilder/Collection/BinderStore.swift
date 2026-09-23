@@ -80,6 +80,9 @@ import os
             var slots: [CardRef?] = Array(repeating: nil, count: loaded.2)
             for item in loaded.1 { slots[item.position] = item.ref }
             displayCase = slots
+            // A reload after an import/restore swaps every slot underneath the
+            // open binder; bumping marks any 3D/2D snapshot as stale.
+            changeToken += 1
         } catch {
             Self.logger.error("BinderStore load failed: \(String(describing: error))")
         }

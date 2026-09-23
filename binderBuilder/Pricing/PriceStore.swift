@@ -8,7 +8,9 @@
 //
 //  Refresh policy: TCGdex (tcgplayer + cardmarket sources) is stale after
 //  24h, eBay after 6h. The eBay provider is engaged only when the user has
-//  switched it on AND pasted credentials (SettingsStore.ebayConfigured).
+//  switched it on AND pasted credentials (SettingsStore.ebayConfigured). It is
+//  built from those credentials on demand, and rebuilt when they change, so
+//  flipping the setting or pasting new keys takes effect on the next refresh.
 //
 
 import Foundation
@@ -28,7 +30,13 @@ import os
     @ObservationIgnored private let catalog: (any CatalogReading)?
     @ObservationIgnored private let settings: SettingsStore
     @ObservationIgnored private let tcgdexProvider: any PriceProvider
-    @ObservationIgnored private let ebayProvider: (any PriceProvider)?
+    /// A fixed eBay provider (tests). Takes precedence over the factory.
+    @ObservationIgnored private let injectedEbayProvider: (any PriceProvider)?
+    /// Builds the live eBay provider for an (appID, certID) pair.
+    @ObservationIgnored private let makeEbayProvider: ((_ appID: String, _ certID: String) -> any PriceProvider)?
+    /// The provider built for the credentials currently in Settings; replaced
+    /// when they change so a stale token/secret is never reused.
+    @ObservationIgnored private var liveEbay: (appID: String, certID: String, provider: any PriceProvider)?
     @ObservationIgnored private let now: @Sendable () -> Date
 
     @ObservationIgnored
@@ -44,14 +52,31 @@ import os
         settings: SettingsStore,
         tcgdexProvider: any PriceProvider = TCGdexPriceProvider(),
         ebayProvider: (any PriceProvider)? = nil,
+        makeEbayProvider: ((_ appID: String, _ certID: String) -> any PriceProvider)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.database = database
         self.catalog = catalog
         self.settings = settings
         self.tcgdexProvider = tcgdexProvider
-        self.ebayProvider = ebayProvider
+        self.injectedEbayProvider = ebayProvider
+        self.makeEbayProvider = makeEbayProvider
         self.now = now
+    }
+
+    /// The eBay provider for the current settings, or nil when eBay is off
+    /// or unconfigured. Read per refresh, so it follows Settings live.
+    private var ebayProvider: (any PriceProvider)? {
+        guard settings.ebayConfigured else { return nil }
+        if let injectedEbayProvider { return injectedEbayProvider }
+        guard let makeEbayProvider,
+              let appID = settings.ebayAppID, let certID = settings.ebayCertID else { return nil }
+        if let liveEbay, liveEbay.appID == appID, liveEbay.certID == certID {
+            return liveEbay.provider
+        }
+        let provider = makeEbayProvider(appID, certID)
+        liveEbay = (appID, certID, provider)
+        return provider
     }
 
     // MARK: - Reading
@@ -92,7 +117,7 @@ import os
         await refresh(
             card: card, provider: tcgdexProvider,
             sources: Self.tcgdexSources, staleness: Self.tcgdexStaleness)
-        if settings.ebayConfigured, let ebayProvider {
+        if let ebayProvider {
             await refresh(
                 card: card, provider: ebayProvider,
                 sources: Self.ebaySources, staleness: Self.ebayStaleness)

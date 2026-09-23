@@ -18,6 +18,9 @@ struct SettingsView: View {
     @State private var statusMessage: String?
     @State private var cloudRestored = false
     @State private var confirmRestore = false
+    /// iCloud already holds a backup this device didn't write: ask restore vs
+    /// replace instead of silently overwriting it.
+    @State private var showingCloudConflict = false
     /// True while an export/import is in flight; disables the Backup buttons
     /// so a second tap can't overlap the first.
     @State private var backupBusy = false
@@ -32,6 +35,9 @@ struct SettingsView: View {
         case .synced(let date): return "Last synced \(date.formatted(date: .abbreviated, time: .shortened))"
         case .unavailable(let msg): return msg
         case .failed(let msg): return "Sync failed: \(msg)"
+        case .conflict(let date):
+            let when = date.map { " from \($0.formatted(date: .abbreviated, time: .shortened))" } ?? ""
+            return "iCloud has a backup\(when) this device hasn't synced — not overwritten."
         }
     }
 
@@ -79,7 +85,14 @@ struct SettingsView: View {
             } footer: {
                 Text("Drops are release-date reminders, not live stock alerts — no free app can see what is actually on a store's shelf. We remind you what is coming and where you saved stores to look.")
             }
-            .onChange(of: settings.dropAlertsEnabled) { _, on in if on { Task { await NotificationService.requestAuthorization() } } }
+            // Reconcile both ways: on schedules the reminders right away, off
+            // cancels the ones already pending instead of leaving them to fire.
+            .onChange(of: settings.dropAlertsEnabled) { _, on in
+                Task {
+                    if on { await NotificationService.requestAuthorization() }
+                    await DropScheduler.reconcile(env: env)
+                }
+            }
 
             Section {
                 if backupBusy {
@@ -102,12 +115,12 @@ struct SettingsView: View {
             } header: {
                 Text("Backup")
             } footer: {
-                Text("Export a JSON backup of your collection, binders, and wishlist, or import one. Importing replaces your current data — relaunch the app afterward.")
+                Text("Export a JSON backup of your collection, binders, and wishlist, or import one. Importing replaces your current data.")
             }
 
             Section {
                 Toggle("iCloud Sync", isOn: $settings.icloudSyncEnabled)
-                Button { Task { await env.cloud.push() } } label: {
+                Button { Task { await pushChecked() } } label: {
                     Label("Back up to iCloud now", systemImage: "icloud.and.arrow.up")
                 }
                 Button(role: .destructive) { confirmRestore = true } label: {
@@ -116,23 +129,40 @@ struct SettingsView: View {
                 if let line = cloudStatusText {
                     Text(line).font(.caption).foregroundStyle(.secondary)
                 }
+                if env.cloud.hasConflict {
+                    Button("Choose which copy to keep…") { showingCloudConflict = true }
+                }
             } header: {
                 Text("iCloud")
             } footer: {
-                Text("Backs up your whole collection to your private iCloud. Restore replaces local data — relaunch to load it.")
+                Text("Backs up your whole collection to your private iCloud. Restore replaces local data. An existing iCloud backup is never overwritten without asking.")
             }
-            .onChange(of: settings.icloudSyncEnabled) { _, on in if on { Task { await env.cloud.push() } } }
+            // Turning sync on checks iCloud first: if a backup is already there,
+            // the push holds back and the user chooses restore vs replace.
+            .onChange(of: settings.icloudSyncEnabled) { _, on in if on { Task { await pushChecked() } } }
             .confirmationDialog("Restore from iCloud?", isPresented: $confirmRestore, titleVisibility: .visible) {
                 Button("Replace local data", role: .destructive) {
-                    Task { if await env.cloud.restoreFromCloud() { cloudRestored = true } }
+                    Task { await restoreFromCloud() }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This replaces everything on this device with your iCloud backup. This can't be undone.")
             }
+            .confirmationDialog("iCloud already has a backup", isPresented: $showingCloudConflict,
+                                titleVisibility: .visible) {
+                Button("Restore iCloud backup to this device", role: .destructive) {
+                    Task { await restoreFromCloud() }
+                }
+                Button("Replace iCloud backup with this device", role: .destructive) {
+                    Task { await env.cloud.push(force: true) }
+                }
+                Button("Decide later", role: .cancel) {}
+            } message: {
+                Text("It was saved from another device or an earlier install. Keep the iCloud copy (replacing what's on this device), or overwrite it with this device's collection. Either choice can't be undone.")
+            }
             .alert("Restored from iCloud", isPresented: $cloudRestored) {
                 Button("OK", role: .cancel) {}
-            } message: { Text("Relaunch the app to load your synced collection.") }
+            } message: { Text("Your synced collection is loaded.") }
 
             Section("About") {
                 LabeledContent("Card data", value: "TCGdex (MIT)")
@@ -165,7 +195,8 @@ struct SettingsView: View {
                         try Data(contentsOf: url)
                     }.value
                     try BackupService.restore(data, into: env.userDatabase)
-                    statusMessage = "Imported. Relaunch the app to see your collection."
+                    await env.reloadAllStores()
+                    statusMessage = "Imported. Your collection is loaded."
                 } catch {
                     statusMessage = "Import failed: \(error.localizedDescription)"
                 }
@@ -175,6 +206,20 @@ struct SettingsView: View {
                                               set: { if !$0 { statusMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(statusMessage ?? "") }
+    }
+
+    /// A push that surfaces the "iCloud already has a backup" choice instead
+    /// of silently overwriting it.
+    private func pushChecked() async {
+        await env.cloud.push()
+        if env.cloud.hasConflict { showingCloudConflict = true }
+    }
+
+    /// Restores from iCloud, then reloads every store in place.
+    private func restoreFromCloud() async {
+        guard await env.cloud.restoreFromCloud() else { return }
+        await env.reloadAllStores()
+        cloudRestored = true
     }
 
     private func credential(_ keyPath: ReferenceWritableKeyPath<SettingsStore, String?>) -> Binding<String> {

@@ -207,10 +207,7 @@ struct FastScanView: View {
                 Text("Loading card index…").foregroundStyle(.white.opacity(0.8))
             } else if useCamera {
                 if cameraDenied {
-                    Label("Camera access is off. Enable it in Settings to scan live.",
-                          systemImage: "camera.metering.none")
-                        .font(.subheadline).foregroundStyle(.white.opacity(0.85))
-                        .multilineTextAlignment(.center).padding(.horizontal, 40)
+                    cameraDeniedFallback
                 } else {
                     Label("Center a card in the frame", systemImage: "viewfinder")
                         .font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.85))
@@ -220,6 +217,31 @@ struct FastScanView: View {
             }
         }
         .padding(.horizontal)
+    }
+
+    /// Camera permission declined: still scan from a photo, or jump to
+    /// Settings to turn the camera on.
+    private var cameraDeniedFallback: some View {
+        VStack(spacing: 12) {
+            Label("Camera access is off. Enable it in Settings to scan live.",
+                  systemImage: "camera.metering.none")
+                .font(.subheadline).foregroundStyle(.white.opacity(0.85))
+                .multilineTextAlignment(.center).padding(.horizontal, 40)
+            PhotosPicker(selection: $pickerItem, matching: .images) {
+                Label("Scan from a photo", systemImage: "photo.on.rectangle")
+                    .padding(.horizontal, 18).padding(.vertical, 10)
+                    .background(.tint, in: Capsule()).foregroundStyle(.white)
+            }
+            if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                Link(destination: settingsURL) {
+                    Label("Open Settings", systemImage: "gear")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .foregroundStyle(.white)
+                }
+            }
+        }
     }
 
     private var photoFallback: some View {
@@ -274,10 +296,9 @@ struct FastScanView: View {
         // scanner itself.
         let scanModel = model
         scanner.onFrame = { frame in scanModel.ingestFrame(frame) }
-        if CameraScanner.authorization == .denied || CameraScanner.authorization == .restricted {
-            cameraDenied = true
-        }
-        scanner.requestAccessAndStart()
+        // Back on the main actor after the (possibly first-run) prompt, so a
+        // "Don't Allow" swaps in the photo fallback right away.
+        cameraDenied = !(await scanner.requestAccessAndStart())
     }
 
     private func scanPhoto(_ item: PhotosPickerItem?) async {

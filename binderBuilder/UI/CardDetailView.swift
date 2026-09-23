@@ -23,6 +23,10 @@ struct CardDetailView: View {
     @State private var showNewGroup = false
     @State private var newGroupName = ""
     @State private var showAlertEditor = false
+    /// "In collection" deletes every copy of this printing — graded slabs,
+    /// prices and notes included — so it asks first unless there's nothing
+    /// to lose (see CollectionStore.removalNeedsConfirmation).
+    @State private var confirmRemoveAll = false
 
     private var currentMarket: Double? {
         quotes.first { $0.source == .tcgplayer && $0.variant == variant }?.market
@@ -70,7 +74,11 @@ struct CardDetailView: View {
                 }
 
                 Button {
-                    env.collection.setOwned(ref, quantity: owned ? 0 : 1)
+                    if owned, CollectionStore.removalNeedsConfirmation(env.collection.copies(of: ref)) {
+                        confirmRemoveAll = true
+                    } else {
+                        env.collection.setOwned(ref, quantity: owned ? 0 : 1)
+                    }
                 } label: {
                     Label(owned ? "In collection" : "Add to collection",
                           systemImage: owned ? "checkmark.seal.fill" : "plus.circle.fill")
@@ -172,6 +180,17 @@ struct CardDetailView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .accessibilityAddTraits(.isStaticText)
             }
+        }
+        .confirmationDialog(
+            "Remove \(CollectionStore.copiesPhrase(env.collection.copies(of: ref))) of \(card.name)?",
+            isPresented: $confirmRemoveAll, titleVisibility: .visible
+        ) {
+            Button("Remove from collection", role: .destructive) {
+                env.collection.setOwned(ref, quantity: 0)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Every \(variant.displayName) copy of this card, with its condition, grade, price, and notes, is deleted. This can't be undone.")
         }
         .sheet(isPresented: $addingCopy) { CopyEditorView(ref: ref, env: env) }
         .sheet(item: $editorCopy) { CopyEditorView(ref: ref, env: env, existing: $0) }

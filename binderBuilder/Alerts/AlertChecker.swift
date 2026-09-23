@@ -15,6 +15,10 @@ struct AlertChecker {
     let env: AppEnvironment
     private static let log = Logger(subsystem: "com.aja.binderBuilder", category: "AlertChecker")
     static let setsEndpoint = URL(string: "https://api.tcgdex.net/v2/en/sets")!
+    /// Most watched cards to live-refresh per check. PriceStore already skips
+    /// anything fetched in the last 24h and keeps 4 requests in flight, so
+    /// this only bounds a first run over a very long watch list.
+    static let maxLiveRefreshes = 40
 
     // MARK: Pure logic
 
@@ -42,6 +46,11 @@ struct AlertChecker {
 
     func checkPrices() async {
         guard env.settings.priceAlertsEnabled, !env.alerts.all.isEmpty else { return }
+        // Without this the check only ever saw the price cache and the
+        // bundled catalog snapshot — a watched card nobody opened recently
+        // never had a fresh price to trip its alert. Stale-gated per card.
+        await env.prices.refreshOwnedAndSlotted(
+            refs: Array(env.alerts.all.map(\.ref).prefix(Self.maxLiveRefreshes)))
         for alert in env.alerts.all {
             guard let price = await currentPrice(alert.ref) else { continue }
             guard Self.isTriggered(kind: alert.kind, threshold: alert.threshold,
@@ -73,8 +82,9 @@ struct AlertChecker {
     /// Rebuilds the pending release-date reminders. Runs after
     /// `checkNewReleases()` so known_set already carries this pass's TCGdex
     /// ids — the signal that confirms (and retires) a curated release.
+    /// Always runs: with reminders switched off, reconcile's job is to
+    /// cancel the ones already pending (a guard here used to skip that).
     func reconcileDrops() async {
-        guard env.settings.dropAlertsEnabled else { return }
         await DropScheduler.reconcile(env: env)
     }
 

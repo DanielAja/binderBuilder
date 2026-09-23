@@ -42,7 +42,7 @@ struct OnboardingView: View {
         Page(
             icon: "calendar.badge.clock",
             title: "Never Miss a Drop",
-            message: "A release calendar with reminders, and alerts when a set you're waiting on lands at a store near you.",
+            message: "A release calendar with date reminders, plus the stores you've saved to check on release day.",
             tint: .pink),
     ]
 
