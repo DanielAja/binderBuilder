@@ -52,6 +52,13 @@ final class AppEnvironment {
     /// from anywhere (2D grid, card detail, scans) always reach the scene.
     private(set) var contentToken = 0
 
+    /// The binder `content` currently holds a snapshot of — which can trail
+    /// `openBinderID`: `openBinder` flips the ID first and swaps the snapshot
+    /// only once the rebuild lands. The 3D page pool has to follow THIS, not
+    /// `openBinderID` (rebinding on the ID alone would re-render the old
+    /// binder's pockets and call them the new one's). nil = empty content.
+    private(set) var contentBinderID: String?
+
     /// Bumped when a content rebuild starts, so one that finishes after a newer
     /// rebuild can drop its result instead of overwriting fresher pockets.
     @ObservationIgnored private var contentBuildSeq = 0
@@ -72,6 +79,7 @@ final class AppEnvironment {
         let built = await BinderCardContentBuilder.build(binderID: binderID, store: binders)
         guard seq == contentBuildSeq else { return false }
         content.replace(with: built)
+        contentBinderID = binderID
         contentToken = token
         return true
     }
@@ -80,6 +88,7 @@ final class AppEnvironment {
     private func clearContent() {
         contentBuildSeq += 1
         content.replace(with: BinderCardContent.empty)
+        contentBinderID = nil
         contentToken = binders.changeToken
     }
 
@@ -88,6 +97,8 @@ final class AppEnvironment {
     var scene: SceneModel {
         if let _scene { return _scene }
         let made = SceneModel(content: content, textureCache: textureCache)
+        // Built around whatever `content` holds right now.
+        made.poolBinding.markBound(contentBinderID)
         _scene = made
         return made
     }
@@ -131,11 +142,22 @@ final class AppEnvironment {
         wishlist = WishlistStore(database: database)
         groups = GroupStore(database: database)
         binders = BinderStore(database: database, catalog: catalog, isOwned: { collection.isOwned($0) })
-        prices = PriceStore(database: database, catalog: catalog, settings: settings)
+        // eBay active listings are opt-in: PriceStore only calls this once the
+        // user has switched eBay on and pasted keys, and rebuilds it when the
+        // keys change. One limiter for the app keeps the daily budget shared.
+        let ebayLimiter = DailyRateLimiter()
+        prices = PriceStore(
+            database: database, catalog: catalog, settings: settings,
+            makeEbayProvider: { appID, certID in
+                EbayBrowseProvider(
+                    tokenProvider: EbayTokenProvider(appID: appID, certID: certID),
+                    limiter: ebayLimiter)
+            })
         alerts = AlertStore(database: database)
         trades = TradeStore(database: database)
         tradeList = TradeListStore(database: database)
-        cloud = CloudSyncService(database: database)
+        // Never let the throwaway in-memory store push over the real backup.
+        cloud = CloudSyncService(database: database, isTemporaryDatabase: warning != nil)
         stats = CollectionStatsStore(catalog: catalog, collection: collection, database: database)
         let cache = ImageCache.standard()
         imageCache = cache
@@ -208,6 +230,25 @@ final class AppEnvironment {
         openBinderID = binderID
         settings.lastOpenBinderID = binderID
         await rebuildContent(for: binderID)
+    }
+
+    /// Re-reads every store after the database was replaced wholesale (JSON
+    /// import, iCloud restore) and re-snapshots the 3D binder, so the restored
+    /// collection shows up in place instead of needing a relaunch.
+    func reloadAllStores() async {
+        async let c: Void = collection.load()
+        async let w: Void = wishlist.load()
+        async let g: Void = groups.load()
+        async let b: Void = binders.load()
+        async let a: Void = alerts.load()
+        async let t: Void = trades.load()
+        async let tl: Void = tradeList.load()
+        _ = await (c, w, g, b, a, t, tl)
+        // The open binder may not exist in the restored data; re-point first,
+        // then re-snapshot whichever binder is open now (its pockets changed
+        // even when its id survived).
+        await reconcileOpenBinder()
+        if let openBinderID { await reloadOpenBinderContent(openBinderID) }
     }
 
     /// Called when the binder list may have changed under the open binder

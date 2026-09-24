@@ -8,6 +8,8 @@
 
 import Testing
 import CoreGraphics
+import Foundation
+import ImageIO
 @testable import binderBuilder
 
 @Suite struct ScannerTests {
@@ -143,4 +145,38 @@ import CoreGraphics
         #expect(abs(projected.midX - 220) < 0.001)
         #expect(projected.minX < 0)
     }
+
+    // MARK: - Real-card regression
+
+    /// The official scan of Base Set Charizard (tcgdex base1-4 low.png) must
+    /// hash close to the catalog's stored orientation-0 dHash. Guards the
+    /// buffer row order: reading the 9x8 bitmap bottom-up hashed the card
+    /// upside-down (25 bits off); top-down it is 9 bits off.
+    @Test func realCardHashesNearItsCatalogHash() throws {
+        let image = try Self.charizardImage()
+        let stored: UInt64 = 0x1935_3939_7719_4D61
+        #expect(PerceptualHash.hamming(PerceptualHash.dHash(image), stored) <= 12)
+    }
+
+    /// End to end over the base1 fixture catalog (102 cards x 4 orientations,
+    /// the same hashes the app bundles): the scan of Charizard matches it.
+    @Test func matcherPicksCharizardFromTheBase1Catalog() async throws {
+        let image = try Self.charizardImage()
+        let url = try #require(
+            Bundle(for: ScannerFixtureLocator.self).url(forResource: "catalog-base1", withExtension: "sqlite"))
+        let catalog = try GRDBCatalogDatabase(path: url.path)
+        let matcher = await CardHashMatcher.load(from: catalog)
+        #expect(!matcher.isEmpty)
+        let matches = matcher.match(PerceptualHash.dHash(image), limit: 3)
+        #expect(matches.first?.cardID == "base1-4")
+        #expect((matches.first?.confidence ?? 0) >= ScanStabilizer.defaultMinConfidence)
+    }
+
+    private static func charizardImage() throws -> CGImage {
+        let data = try fixtureData("base1-4-low", "png")
+        let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+        return try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+    }
 }
+
+private final class ScannerFixtureLocator {}

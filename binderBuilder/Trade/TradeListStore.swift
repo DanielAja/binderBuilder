@@ -77,8 +77,10 @@ import os
     /// every listing of it. Returns the new listed state.
     @discardableResult
     func toggle(_ ref: CardRef, condition: CardCondition = .nm) -> Bool {
-        if let existing = listing(for: ref) {
-            remove(id: existing.id)
+        if isListed(ref) {
+            // Every listing, as documented: removing only the first left a
+            // printing listed twice still showing as "for trade".
+            for listing in listings where listing.ref == ref { remove(id: listing.id) }
             return false
         }
         save(TradeListing(ref: ref, condition: condition))

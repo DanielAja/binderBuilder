@@ -125,6 +125,10 @@ struct SetCardsView: View {
     @State private var quickAdd = false
     @State private var celebrate = false
     @State private var confirmMarkAll = false
+    /// The card whose copies a tile tap is about to delete, pending the
+    /// user's confirmation (several copies / graded / priced — see
+    /// CollectionStore.removalNeedsConfirmation).
+    @State private var pendingRemoval: CardSummary?
     @ScaledMetric(relativeTo: .largeTitle) private var sealSize: CGFloat = 56
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -166,6 +170,7 @@ struct SetCardsView: View {
                 ForEach(shown) { card in
                     if quickAdd {
                         Button { toggleOwned(card) } label: { tile(card) }.buttonStyle(.pressable)
+                            .accessibilityHint(isOwned(card) ? "Removes it from your collection" : "Adds it to your collection")
                     } else {
                         NavigationLink(value: card) { tile(card) }.buttonStyle(.pressable)
                     }
@@ -190,6 +195,21 @@ struct SetCardsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Adds a copy of every card in \(set.name) you don't already own.")
+        }
+        .confirmationDialog(
+            pendingRemoval.map {
+                "Remove \(CollectionStore.copiesPhrase(env.collection.allCopies(ofCardID: $0.id))) of \($0.name)?"
+            } ?? "",
+            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
+            titleVisibility: .visible, presenting: pendingRemoval
+        ) { card in
+            Button("Remove from collection", role: .destructive) {
+                removeAllCopies(of: card)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Every copy of this card, graded ones included, is deleted with its condition, price, and notes. This can't be undone.")
         }
         .task(id: set.id) {
             cards = (try? await env.catalog?.cards(inSet: set.id)) ?? []
@@ -253,6 +273,11 @@ struct SetCardsView: View {
                     .shadow(radius: 2)
                     .padding(5)
             }
+            // One VoiceOver stop per tile (the art + check glyph read as
+            // nothing useful), same pattern as CollectionView's tiles.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(card.name), number \(card.localNumber)")
+            .accessibilityValue(isOwned(card) ? "Owned" : "Not owned")
     }
 
     private func isOwned(_ card: CardSummary) -> Bool {
@@ -266,17 +291,25 @@ struct SetCardsView: View {
     }
 
     private func toggleOwned(_ card: CardSummary) {
-        let wasComplete = !cards.isEmpty && cards.allSatisfy(isOwned)
         let owned = isOwned(card)
+        if owned, CollectionStore.removalNeedsConfirmation(env.collection.allCopies(ofCardID: card.id)) {
+            pendingRemoval = card
+            return
+        }
+        let wasComplete = !cards.isEmpty && cards.allSatisfy(isOwned)
         if owned {
-            for v in CardVariant.allCases {
-                env.collection.setOwned(CardRef(cardID: card.id, variant: v), quantity: 0)
-            }
+            removeAllCopies(of: card)
         } else {
             env.collection.setOwned(primaryRef(card), quantity: 1)
         }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         celebrateIfComplete(wasComplete: wasComplete)
+    }
+
+    private func removeAllCopies(of card: CardSummary) {
+        for v in CardVariant.allCases {
+            env.collection.setOwned(CardRef(cardID: card.id, variant: v), quantity: 0)
+        }
     }
 
     private func markAllOwned() {

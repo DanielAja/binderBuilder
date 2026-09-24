@@ -38,7 +38,7 @@ scanner._
 
 ## Requirements
 
-- Xcode (current stable release)
+- Xcode 27.1 or later (the iPhone Duo APIs need the iOS 27.1 SDK)
 - iOS 18.0+ deployment target (iOS 26.5 SDK used by the test target)
 - The Metal toolchain, which Xcode does not always install by default:
 
@@ -82,19 +82,18 @@ The iPhone Duo adaptation lives in `binderBuilder/Fold/` and
   snapping.
 
 The Duo symbols sit behind the `DUO_SDK` compilation condition as well as
-`@available(iOS 27.1, *)`. `DUO_SDK` is **off by default**: no compiler
-conditional can see an SDK version, and Xcode 27.0 already ships Swift 6.4,
-so a `#if compiler(>=6.4)` gate would compile the calls against an SDK that
-does not have them. With the flag off the app builds on Xcode 27.0 and
-reports every device as non-folding, which is the pre-existing behaviour.
-
-Once Xcode 27.1 (iOS 27.1 SDK) is installed, turn the real APIs on by adding
-`DUO_SDK` to the `binderBuilder` target's **Swift Compiler – Custom Flags →
-Active Compilation Conditions**, or build with:
+`@available(iOS 27.1, *)`. `DUO_SDK` is **on** in both Debug and Release
+(project-level Active Compilation Conditions), so the project needs
+**Xcode 27.1 or later** (iOS 27.1 SDK). No compiler conditional can see an
+SDK version (Xcode 27.0 already ships Swift 6.4), which is why the gate is a
+flag rather than `#if compiler`. To build on Xcode 27.0, override the
+conditions without it (command-line settings replace the project's):
 
 ```sh
-xcodebuild -scheme binderBuilder SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) DUO_SDK' build
+xcodebuild -scheme binderBuilder SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG build
 ```
+
+With the flag off, every device reports as non-folding.
 
 To exercise the fold layouts on an ordinary simulator, pass `-fold` and
 optionally `-hinge`:

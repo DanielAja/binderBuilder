@@ -6,9 +6,15 @@
 //
 
 import SwiftUI
+import UserNotifications
 
 @main
 struct binderBuilderApp: App {
+    init() {
+        // Set at launch so foreground price/release alerts show as banners.
+        UNUserNotificationCenter.current().delegate = ForegroundNotificationDelegate.shared
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

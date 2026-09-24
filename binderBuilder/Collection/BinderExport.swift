@@ -7,13 +7,20 @@
 //
 //  Card art is pre-fetched through the existing ImageCache at .high quality
 //  (six at a time) and drawn into a clean, letter-sized SwiftUI page which
-//  ImageRenderer rasterizes at 2x. Unlike the 3D binder, an export is always
+//  ImageRenderer rasterizes at 2x.
+//
+//  Memory: a 20-sheet binder is 360 pockets, and holding every decoded
+//  600x825 .high image for the whole export (~2 MB each) could run a phone
+//  out of memory. Each image is instead shrunk to the size a pocket actually
+//  prints at and kept JPEG-encoded (tens of KB); pixels are decoded only
+//  while their own page renders, so at most one page's art is in memory. Unlike the 3D binder, an export is always
 //  full color — it is the user's record of their own binder, so unowned cards
 //  are not grayed out.
 //
 
 import CoreGraphics
 import Foundation
+import ImageIO
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -72,8 +79,10 @@ struct BinderExportJob {
     let binderName: String
     /// Already trimmed to the printable pages.
     let pages: [BinderExportPage]
-    /// Card art by card id; a missing entry renders as a titled placeholder.
-    let images: [String: CGImage]
+    /// Card art by card id, downsampled and JPEG-encoded (see `exportArt`);
+    /// decoded per page while rendering. A missing entry renders as a titled
+    /// placeholder.
+    let art: [String: Data]
 }
 
 enum BinderExport {
@@ -85,6 +94,47 @@ enum BinderExport {
     /// Matches ImageCache.prefetch: enough to saturate the CDN, few enough to
     /// keep decoded 600x825 images from piling up.
     nonisolated static let maxConcurrentFetches = 6
+    /// Longest side, in pixels, of the art kept per card. A pocket prints
+    /// ~146x205 pt, i.e. ~292x410 px at `renderScale`; 480 leaves headroom.
+    nonisolated static let artMaxPixelSize = 480
+    nonisolated static let artJPEGQuality: CGFloat = 0.85
+
+    /// Shrinks a fetched card image to export size and JPEG-encodes it,
+    /// flattening the transparent card corners onto the page's white. Runs in
+    /// the fetch task, so the full-size decode is dropped straight away.
+    nonisolated static func exportArt(from image: CGImage) -> Data? {
+        let longest = CGFloat(max(image.width, image.height))
+        guard longest > 0 else { return nil }
+        let scale = min(1, CGFloat(artMaxPixelSize) / longest)
+        let width = max(1, Int((CGFloat(image.width) * scale).rounded()))
+        let height = max(1, Int((CGFloat(image.height) * scale).rounded()))
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+        else { return nil }
+        let rect = CGRect(x: 0, y: 0, width: width, height: height)
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(rect)
+        context.interpolationQuality = .high
+        context.draw(image, in: rect)
+        guard let small = context.makeImage() else { return nil }
+
+        let out = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            out, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(
+            destination, small,
+            [kCGImageDestinationLossyCompressionQuality: artJPEGQuality] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return out as Data
+    }
+
+    /// Decodes one pocket's art at render time.
+    nonisolated static func decodeArt(_ data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
 
     // MARK: - Pure helpers
 
@@ -172,29 +222,30 @@ enum BinderExport {
             wanted[slot.ref.cardID] = slot.imageBase
         }
 
-        var images: [String: CGImage] = [:]
+        var art: [String: Data] = [:]
         var remaining = Array(wanted)[...]
         let total = max(1, wanted.count)
         var done = 0
-        await withTaskGroup(of: (String, CGImage?).self) { group in
+        await withTaskGroup(of: (String, Data?).self) { group in
             func addNext() {
                 guard let (cardID, imageBase) = remaining.popFirst() else { return }
                 group.addTask {
+                    // Only the small encoded copy leaves the task.
                     let image = try? await cache.image(
                         for: cardID, imageBase: imageBase, quality: .high, pinned: true)
-                    return (cardID, image)
+                    return (cardID, image.flatMap(BinderExport.exportArt(from:)))
                 }
             }
             for _ in 0..<min(maxConcurrentFetches, remaining.count) { addNext() }
-            while let (cardID, image) = await group.next() {
-                if let image { images[cardID] = image }
+            while let (cardID, data) = await group.next() {
+                if let data { art[cardID] = data }
                 done += 1
                 progress(0.05 + 0.9 * Double(done) / Double(total))
                 addNext()
             }
         }
         progress(0.95)
-        return BinderExportJob(binderName: binder.name, pages: pages, images: images)
+        return BinderExportJob(binderName: binder.name, pages: pages, art: art)
     }
 
     /// Every side of the binder in reading order (sheet 0 front, sheet 0 back,
@@ -344,7 +395,7 @@ enum BinderExport {
         BinderExportPageView(
             title: pageTitle(binderName: job.binderName, page: page),
             slots: page.slots,
-            images: job.images,
+            art: job.art,
             size: pageSize)
     }
 }
@@ -355,7 +406,7 @@ enum BinderExport {
 private struct BinderExportPageView: View {
     let title: String
     let slots: [BinderExportSlot?]
-    let images: [String: CGImage]
+    let art: [String: Data]
     let size: CGSize
 
     /// Standard trading-card aspect (2.5" x 3.5").
@@ -391,7 +442,8 @@ private struct BinderExportPageView: View {
     private func pocket(_ slot: BinderExportSlot?) -> some View {
         ZStack {
             if let slot {
-                if let image = images[slot.ref.cardID] {
+                // Decoded here, during this page's render only.
+                if let data = art[slot.ref.cardID], let image = BinderExport.decodeArt(data) {
                     Image(decorative: image, scale: 1)
                         .resizable()
                         .aspectRatio(contentMode: .fit)

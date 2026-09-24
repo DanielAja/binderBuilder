@@ -48,7 +48,9 @@ struct AlertEditorView: View {
                             .focused($thresholdFieldFocused)
                     }
                 } footer: {
-                    if let currentPrice {
+                    if kind == .percentDrop, percentBaseline == nil {
+                        Text("A percent-drop alert needs today's price to measure from, and there isn't one for this card yet. Use a target price instead, or try again once a price has loaded.")
+                    } else if let currentPrice {
                         Text("Current price: \(currentPrice.formatted(.currency(code: "USD")))")
                     } else {
                         Text("Uses the free TCGdex market price, checked when you open the app.")
@@ -76,18 +78,34 @@ struct AlertEditorView: View {
             .onAppear {
                 if let existing {
                     kind = existing.kind
-                    thresholdText = String(existing.threshold)
+                    thresholdText = DecimalInput.string(existing.threshold)
                 }
             }
             .task { summary = try? await env.catalog?.card(id: ref.cardID)?.summary }
         }
     }
 
-    private var canSave: Bool { Double(thresholdText.trimmingCharacters(in: .whitespaces)) != nil }
+    /// What a percent drop is measured from: today's price, else the baseline
+    /// an existing percent alert was armed with. Without one the alert could
+    /// never fire (AlertChecker.isTriggered needs a baseline), so it can't be
+    /// saved.
+    private var percentBaseline: Double? {
+        if let currentPrice, currentPrice > 0 { return currentPrice }
+        guard existing?.kind == .percentDrop, let old = existing?.baseline, old > 0 else { return nil }
+        return old
+    }
+
+    /// Locale-aware: the decimal pad types "12,50" in many regions.
+    private var parsedThreshold: Double? { DecimalInput.parse(thresholdText) }
+
+    private var canSave: Bool {
+        guard parsedThreshold != nil else { return false }
+        return kind == .belowTarget || percentBaseline != nil
+    }
 
     private func save() {
-        guard let threshold = Double(thresholdText.trimmingCharacters(in: .whitespaces)) else { return }
-        let baseline = kind == .percentDrop ? currentPrice : nil
+        guard canSave, let threshold = parsedThreshold else { return }
+        let baseline = kind == .percentDrop ? percentBaseline : nil
         env.alerts.setAlert(ref, kind: kind, threshold: threshold, baseline: baseline)
         env.settings.priceAlertsEnabled = true
         Task { await NotificationService.requestAuthorization() }

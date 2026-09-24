@@ -96,13 +96,15 @@ struct CopyEditorView: View {
         guard let copy = existing else { return }
         condition = copy.condition
         if let grade = copy.grade { isGraded = true; company = grade.company; gradeValue = grade.value }
-        if let price = copy.acquiredPrice { acquiredPrice = String(price) }
+        if let price = copy.acquiredPrice { acquiredPrice = DecimalInput.string(price) }
         notes = copy.notes ?? ""
     }
 
     private func save() {
         let grade = isGraded ? CardGrade(company: company, value: gradeValue) : nil
-        let price = Double(acquiredPrice.trimmingCharacters(in: .whitespaces))
+        // Locale-aware: "12,50" from a European decimal pad used to parse as
+        // nil and silently drop the price.
+        let price = DecimalInput.parse(acquiredPrice)
         let trimmedNotes = notes.trimmingCharacters(in: .whitespaces)
         if var copy = existing {
             copy.condition = condition

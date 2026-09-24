@@ -38,10 +38,17 @@ does not attach any identifier, collection data, or usage data to them.
 
 ## Optional: eBay price lookups
 
-You may optionally enter your own eBay API credentials in Settings to look
-up sold-listing prices. If you do, those credentials are stored only in
+You may optionally enter your own eBay API credentials in Settings to see
+prices from active eBay listings. If you do, those credentials are stored only in
 your device's Keychain and are used to query eBay's API directly from your
 device. We never see or receive them.
+
+## Optional: location (store finder)
+
+If you use "find stores near me" on the Release calendar & stores screen,
+the app asks for your location while in use. It is used only to search for
+nearby card shops through Apple Maps (MapKit), and stores you save are kept
+on your device. Your location is never sent to us or any third party.
 
 ## Optional: iCloud backup
 

@@ -98,6 +98,11 @@ Suggested text:
 >
 > Camera access is used only for on-device card recognition (matching against
 > the bundled catalog); frames are never uploaded. The optional eBay
-> sold-listings feature requires the user to supply their own eBay API
+> active-listing price feature requires the user to supply their own eBay API
 > credentials in Settings — it is inert until they do, and is not required to
 > use the app.
+>
+> The optional "Release calendar & stores" screen asks for when-in-use
+> location only when the user taps "find stores near me", and uses it solely
+> for an Apple Maps (MapKit) local search. The location is not sent to the
+> developer or any third party.

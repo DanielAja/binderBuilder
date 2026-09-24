@@ -26,6 +26,26 @@ final class MotionUpdateSystem: System {
     static var provider: (any MotionProvider)?
     /// -holoPhase override: freezes the light phase for screenshots.
     static var holoPhaseOverride: SIMD2<Float>?
+    /// Reduce Motion / Low Power Mode (set by BinderSceneView). The foil
+    /// holds still at its rest phase: no tilt tracking (the provider is
+    /// stopped anyway), no ambient drift, no periodic or first-touch sweep.
+    /// Kept apart from `holoPhaseOverride` so an accessibility setting never
+    /// clobbers the screenshot harness's launch argument, or vice versa.
+    static var motionReduced = false
+
+    /// The phase the foil freezes at under `motionReduced`: exactly what a
+    /// device held in the rest pose shows at t = 0, so the frozen foil is
+    /// the same one everybody else sees before they tilt.
+    nonisolated static let reducedMotionPhase = holoPhase(sample: .rest, elapsed: 0, override: nil)
+
+    /// The override this frame should use: the launch argument wins, then
+    /// the Reduce Motion freeze, else none (live motion).
+    nonisolated static func effectiveOverride(
+        launchOverride: SIMD2<Float>?,
+        motionReduced: Bool
+    ) -> SIMD2<Float>? {
+        launchOverride ?? (motionReduced ? reducedMotionPhase : nil)
+    }
 
     /// How strongly device tilt shifts the foil hue.
     nonisolated static let tiltGain: Float = 0.6
@@ -91,13 +111,18 @@ final class MotionUpdateSystem: System {
     func update(context: SceneUpdateContext) {
         elapsed += Float(context.deltaTime)
 
+        let override = Self.effectiveOverride(
+            launchOverride: Self.holoPhaseOverride, motionReduced: Self.motionReduced)
         let phase = Self.holoPhase(
             sample: Self.provider?.latest ?? .rest,
             elapsed: elapsed,
-            override: Self.holoPhaseOverride
+            override: override
         )
-        // Floating ("main") card gets an occasional extra shimmer sweep.
-        let shimmer = Self.holoPhaseOverride == nil ? Self.shimmerSweep(elapsed: elapsed) : 0
+        // Floating ("main") card gets an occasional extra shimmer sweep —
+        // unless the phase is frozen, where a sweep is exactly the motion
+        // being asked away.
+        let frozen = override != nil
+        let shimmer = frozen ? 0 : Self.shimmerSweep(elapsed: elapsed)
 
         for entity in context.entities(matching: Self.query, updatingSystemWhen: .rendering) {
             guard let card = entity as? ModelEntity,
@@ -108,7 +133,9 @@ final class MotionUpdateSystem: System {
                 if f.firstTouchGlint {
                     // A flagged card gets its one-shot bump instead of the
                     // periodic ambient shimmer, then the flag is consumed.
-                    extra = Self.firstFloatGlint(progress: f.glintElapsed)
+                    // Frozen: the bump is still consumed (so it doesn't fire
+                    // later, out of context) but never shown.
+                    extra = frozen ? 0 : Self.firstFloatGlint(progress: f.glintElapsed)
                     f.glintElapsed += Float(context.deltaTime)
                     if f.glintElapsed >= Self.shimmerDuration {
                         f.firstTouchGlint = false

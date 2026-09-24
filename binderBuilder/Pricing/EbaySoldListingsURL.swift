@@ -3,7 +3,8 @@
 //  binderBuilder
 //
 //  Zero-API "View sold on eBay" link-out: a sold+completed listings search
-//  URL opened in SFSafariViewController. No eBay credentials involved.
+//  URL that CardDetailView opens with a SwiftUI `Link` (Safari / the eBay
+//  app). No eBay credentials involved.
 //
 
 import Foundation

@@ -29,8 +29,12 @@ nonisolated enum PerceptualHash {
         var hash: UInt64 = 0
         var bitIndex = 0
         for row in 0..<h {
-            // CGContext buffer is bottom-up; PIL rows run top-down.
-            let bufferRow = h - 1 - row
+            // A bitmap CGContext's backing memory is top-down: buffer row 0
+            // holds the TOP of the drawn image (only the drawing coordinate
+            // space is bottom-up), which is already PIL's row order. Flipping
+            // here hashed the card upside-down and pushed a real Charizard
+            // photo from 9 to 25 bits off its stored hash (see ScannerTests).
+            let bufferRow = row
             for col in 0..<(w - 1) {
                 let left = pixels[bufferRow * w + col]
                 let right = pixels[bufferRow * w + col + 1]

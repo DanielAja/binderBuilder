@@ -62,9 +62,11 @@ enum SceneBootstrap {
         HitZoneComponent.registerComponent()
 
         // Device motion drives the card holo sweep (and, later, floating-card
-        // drift). Provider runs for the scene's lifetime; -holoPhase freezes it.
+        // drift); -holoPhase freezes it. Created stopped: the scene outlives
+        // its view across tab switches, so BinderSceneView starts it on
+        // appear and stops it on disappear / backgrounding / Reduce Motion —
+        // a 60 Hz CoreMotion stream nobody is looking at is pure battery.
         let motionProvider = MotionProviderFactory.make(launchState: launchState)
-        motionProvider.start()
         MotionUpdateSystem.provider = motionProvider
         MotionUpdateSystem.holoPhaseOverride = launchState.holoPhase
 
@@ -193,6 +195,9 @@ enum SceneBootstrap {
             // Card pull-out / inspect / return.
             let interaction = CardInteractionController(root: root, cameraRig: cameraRig)
             cardInteraction = interaction
+            flipController.willRebindAfterSettle = { [weak interaction] in
+                interaction?.snapFloatingCardHome()
+            }
 
             // -uiState cardFloating: auto-pull a card shortly after launch so
             // the floating/holo pose can be screenshot deterministically.
@@ -391,6 +396,16 @@ final class BinderFlipController {
     /// populate the initial spread.
     var onRebound: (([(entity: ModelEntity, sheet: Int?)]) -> Void)?
 
+    /// Called just before a settled flip rebinds the pool. The card layer
+    /// hooks here to send any pulled-out card home first (see handleSettled).
+    /// Other rebind callers (content refresh, binder switch) do the same
+    /// explicitly, since they already know a rebind is coming.
+    var willRebindAfterSettle: (() -> Void)?
+
+    /// Fires whenever a rebind lands on a different spread (a settled flip,
+    /// a binder switch). The view mirrors it for VoiceOver's "pages x–y".
+    var onSpreadChanged: ((Int) -> Void)?
+
     /// Index into `pages` of the page currently being dragged.
     private var activeDragIndex: Int?
 
@@ -465,6 +480,8 @@ final class BinderFlipController {
     /// stack slabs, rest heights, occupancy, and the pick zones. Called at
     /// startup and after every settled flip.
     func rebind(spread: Int) {
+        let previousSpread = spreadIndex
+        defer { if spreadIndex != previousSpread { onSpreadChanged?(spreadIndex) } }
         spreadIndex = min(max(spread, 0), sheetCount)
         let bound = PagePool.boundSheets(spread: spreadIndex, sheetCount: sheetCount)
         let leftSheets = PagePool.sheetsOnLeft(spread: spreadIndex)
@@ -639,6 +656,35 @@ final class BinderFlipController {
         pages[index].entity.components.set(component)
     }
 
+    /// Releases whatever page is being dragged at its live curl, with no
+    /// flick — the gesture that owned it was cancelled, so there is no finger
+    /// position or velocity to release it with. No-op when nothing is held.
+    func releaseActiveDrag() {
+        guard let index = activeDragIndex,
+              let component = pages[index].entity.components[PageComponent.self] else {
+            activeDragIndex = nil
+            return
+        }
+        endDrag(t: component.currentT, velocity: 0)
+    }
+
+    // MARK: Programmatic flip (VoiceOver)
+
+    /// Turns one page without a finger — the VoiceOver adjustable action.
+    /// Goes through the exact drag -> release-spring path a flick takes (so
+    /// occupancy-weighted timing, the settle, and the rebind are all the ones
+    /// a hand gets), just released from rest with a velocity past the flick
+    /// threshold. Returns false when there is no page to turn that way, or a
+    /// finger already holds one.
+    @discardableResult
+    func flip(forward: Bool) -> Bool {
+        guard activeDragIndex == nil,
+              let startT = beginDrag(direction: forward ? .forward : .backward, psi: 0) else { return false }
+        let speed = GestureMath.flickThreshold(span: GestureMath.referenceSpan) * 1.5
+        endDrag(t: startT, velocity: forward ? speed : -speed)
+        return true
+    }
+
     // MARK: Debug hooks
 
     /// -curl: freeze the active right page mid-curl.
@@ -677,6 +723,12 @@ final class BinderFlipController {
     // MARK: Settle handling
 
     private func handleSettled(entity: Entity, component: PageComponent) {
+        // Every settle rebinds, and CardPlacement.sync indexes page.children:
+        // a card that is out of its pocket (floating, or still springing home)
+        // reads as an empty pocket and gets a duplicate spawned beside it —
+        // or, if its page is re-pointed at another sheet, a home it no longer
+        // belongs in. Put such cards back first.
+        willRebindAfterSettle?()
         let target: Float = component.currentT > 0.5 ? 1 : 0
         if component.sheetIndex == spreadIndex, target == 1 {
             rebind(spread: spreadIndex + 1) // forward flip completed

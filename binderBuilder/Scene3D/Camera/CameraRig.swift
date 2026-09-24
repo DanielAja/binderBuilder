@@ -275,9 +275,20 @@ final class CameraRig {
         snapToCurrentPose()
     }
 
-    /// Smoothly dollies the camera to a framing (scene transition).
+    /// Reduce Motion: every dolly (scene change, restage on rotation or a
+    /// hinge move, the zoom reset) becomes a cut. Swooping the whole world
+    /// past the viewer is the textbook vestibular trigger; the mode
+    /// controller's crossfade still softens the scene change itself.
+    var reduceMotion = false
+
+    /// Smoothly dollies the camera to a framing (scene transition). Snaps
+    /// instead under Reduce Motion.
     func animate(to framing: Framing, duration: TimeInterval = 0.7) {
         setFraming(framing)
+        if reduceMotion {
+            snapToCurrentPose()
+            return
+        }
         camera.move(
             to: targetTransform(for: framing),
             relativeTo: root, duration: duration, timingFunction: .easeInOut)
@@ -311,7 +322,7 @@ final class CameraRig {
     func resetZoom(animated: Bool = true) {
         guard zoom != 1 else { return }
         resetZoomValue()
-        if animated {
+        if animated && !reduceMotion {
             camera.move(
                 to: targetTransform(for: framing),
                 relativeTo: root, duration: 0.25, timingFunction: .easeInOut)

@@ -51,6 +51,11 @@ final class CardInteractionController {
     /// Distance in front of the camera the inspected card floats to (m).
     private let floatDistance: Float = 0.26
 
+    /// Reduce Motion: the card appears at (or back in) its pose instead of
+    /// flying there. The float target is unchanged, so the float system has
+    /// nothing left to animate and the card simply sits.
+    var reduceMotion = false
+
     // Active-drag arcball state.
     private var dragStart: CGPoint?
     private var dragStartOrientation: simd_quatf?
@@ -80,24 +85,27 @@ final class CardInteractionController {
         returnCard()
     }
 
-    /// Puts the floating card back in its pocket INSTANTLY — no spring, no
-    /// haptic. This is the path used when the binder is about to be hidden
+    /// Puts every card that is out of its pocket back INSTANTLY — no spring,
+    /// no haptic. This is the path used when the binder is about to be hidden
     /// (shelf) or rebound: a card still parented to the scene root would
     /// render alone in the shelf room, and CardPlacementSystem.sync would see
-    /// its pocket as empty. Mirrors CardFloatSystem.finalizeReturn exactly.
+    /// its pocket as empty and spawn a duplicate.
+    ///
+    /// "Every card", not just `floatingCard`: a card on its way back is
+    /// already untracked here (`returnCard` lets go of it the moment it is
+    /// sent home) but stays root-parented until CardFloatSystem settles it,
+    /// so a flip that settles mid-return would otherwise strand it.
     func snapFloatingCardHome() {
-        guard let card = floatingCard, let f = card.components[CardFloatComponent.self] else { return }
-        card.components.remove(CardFloatComponent.self)
-        if let parent = f.homeParent {
-            parent.addChild(card)
-            card.transform = f.homeLocal
+        // Floating cards are always direct children of the root (pullOut
+        // reparents them there); snapshot the list, since finalizing moves
+        // them out of it.
+        for entity in Array(root.children) {
+            guard let f = entity.components[CardFloatComponent.self] else { continue }
+            CardFloatSystem.finalizeReturn(entity, f)
         }
-        // Force CardPlacementSystem to re-pose it at the pocket curl frame.
-        if var slot = card.components[CardSlotComponent.self] {
-            slot.lastParams = nil
-            card.components.set(slot)
+        if floatingCard != nil {
+            floatingCard = nil   // fires onFloatingChanged, clearing the UI bar
         }
-        floatingCard = nil   // fires onFloatingChanged, clearing the UI bar
         resetDrag()
     }
 
@@ -193,6 +201,21 @@ final class CardInteractionController {
         resetDrag()
     }
 
+    /// A spin drag that ended without `dragEnded`: SwiftUI cancels a gesture
+    /// (an incoming call, a system swipe, the view going away) without calling
+    /// onEnded. Hand the card back to the float system with no flick, so it
+    /// doesn't stay pinned under a finger that has already left — and so the
+    /// next drag starts a fresh arcball instead of resuming a stale one.
+    func cancelDrag() {
+        guard dragStart != nil else { return }
+        if let card = floatingCard, var f = card.components[CardFloatComponent.self] {
+            f.userControlled = false
+            f.spin = .zero
+            card.components.set(f)
+        }
+        resetDrag()
+    }
+
     private func resetDrag() {
         dragStart = nil
         dragStartOrientation = nil
@@ -201,12 +224,23 @@ final class CardInteractionController {
 
     // MARK: Pull-out / return
 
-    private func pullOut(_ card: ModelEntity) {
-        let homeParent = card.parent
-        let homeLocal = card.transform
-        // Reparent to the scene root, keeping its current on-page world pose so
-        // it springs smoothly from the sleeve rather than jumping.
-        root.addChild(card, preservingWorldTransform: true)
+    /// Internal rather than private so tests can pull a specific card without
+    /// a ray pick.
+    func pullOut(_ card: ModelEntity) {
+        // A card still springing home is root-parented and still carries its
+        // float component — and it is pickable, so a quick second tap lands on
+        // it. Its CURRENT parent/transform are the scene root and a mid-air
+        // pose; adopting those as "home" would leave it floating in the room
+        // for good. Keep the pocket it came from, and its live velocity, so
+        // the card simply turns around.
+        let previous = card.components[CardFloatComponent.self]
+        let homeParent = previous?.homeParent ?? card.parent
+        let homeLocal = previous?.homeLocal ?? card.transform
+        if previous == nil {
+            // Reparent to the scene root, keeping its current on-page world
+            // pose so it springs smoothly from the sleeve rather than jumping.
+            root.addChild(card, preservingWorldTransform: true)
+        }
 
         let camPos = cameraRig.camera.position(relativeTo: nil)
         let camOrientation = cameraRig.camera.orientation(relativeTo: nil)
@@ -235,8 +269,14 @@ final class CardInteractionController {
             homeParent: homeParent,
             homeLocal: homeLocal,
             targetPosition: target,
-            targetOrientation: faceCamera
+            targetOrientation: faceCamera,
+            velocity: reduceMotion ? .zero : (previous?.velocity ?? .zero)
         ))
+        if reduceMotion {
+            // Arrive, don't fly: the spring then has no distance to cover.
+            card.setPosition(target, relativeTo: nil)
+            card.setOrientation(faceCamera, relativeTo: nil)
+        }
         floatingCard = card
         softHaptic.impactOccurred(intensity: 0.7)   // pops out of the sleeve
     }
@@ -257,6 +297,10 @@ final class CardInteractionController {
         card.components.set(f)
         floatingCard = nil
         resetDrag()
+        if reduceMotion {
+            // Straight back into the sleeve; no flight to watch.
+            CardFloatSystem.finalizeReturn(card, f)
+        }
         softHaptic.impactOccurred(intensity: 0.45)   // slides back into the sleeve
     }
 
